@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 # 导入数据库管理器
 from database.db_merchants import merchant_manager
+from database.db_binding_codes import BindingCodesDatabase
 from database.db_connection import db_manager
 from database.db_media import media_db
 from database.db_regions import region_manager
@@ -347,6 +348,41 @@ class PostMgmtService:
                             sent_ok = False
                 except Exception:
                     sent_ok = False
+
+            # 发布时的到期时间优先级：
+            # 1) 管理员显式传入 expire_time（路由传参）
+            # 2) 若未传参，则读取商户当前的 expiration_time（若存在且在发布时间之后，视为管理员在详情页手动设置，尊重之）
+            # 3) 否则根据最近一次绑定码 plan_days 计算：publish_time + plan_days
+            if status == MERCHANT_STATUS.PUBLISHED.value:
+                try:
+                    merchant_row = await merchant_manager.get_merchant_by_id(merchant_id)
+                except Exception:
+                    merchant_row = None
+                if expire_time is None:
+                    admin_override = None
+                    try:
+                        raw = merchant_row.get('expiration_time') if merchant_row else None
+                        if raw:
+                            if isinstance(raw, str):
+                                from datetime import datetime as _dt
+                                try:
+                                    admin_override = _dt.fromisoformat(raw)
+                                except Exception:
+                                    admin_override = None
+                            elif isinstance(raw, datetime):
+                                admin_override = raw
+                    except Exception:
+                        admin_override = None
+
+                    if admin_override and publish_time and admin_override > publish_time:
+                        expire_time = admin_override
+                    else:
+                        try:
+                            plan_days = await BindingCodesDatabase.get_last_used_plan_days(merchant_id)
+                            if plan_days and plan_days > 0:
+                                expire_time = publish_time + timedelta(days=int(plan_days))
+                        except Exception:
+                            pass
 
             result = False
             if status != MERCHANT_STATUS.PUBLISHED.value or sent_ok:

@@ -34,6 +34,8 @@ async def binding_codes_list(request: Request):
             (request.query_params.get("include_expired") or "").lower() == "true"
             if ("include_expired" in request.query_params) else False
         )
+        plan_filter_raw = request.query_params.get("plan_days")
+        plan_days_filter = int(plan_filter_raw) if (plan_filter_raw and plan_filter_raw.isdigit()) else None
         page = int(request.query_params.get("page", "1"))
         limit = 20  # 每页显示20条
         offset = (page - 1) * limit
@@ -42,7 +44,8 @@ async def binding_codes_list(request: Request):
         binding_data = await binding_codes_manager.get_all_binding_codes(
             include_used=include_used,
             include_expired=include_expired,
-            limit=limit if page == 1 else None  # 首页限制，后续加载更多
+            limit=limit if page == 1 else None,  # 首页限制，后续加载更多
+            plan_days=plan_days_filter
         )
         
         codes = binding_data.get("codes", [])
@@ -86,6 +89,7 @@ async def binding_codes_list(request: Request):
                     Td(merchant_info),
                     Td(code.get('created_at', '')),
                     Td(expires_info),
+                    Td((str(code.get('plan_days')) + ' 天') if code.get('plan_days') else '-'),
                     Td(code.get('used_at', '') or '-'),
                     Td(actions)
                 )
@@ -108,6 +112,18 @@ async def binding_codes_list(request: Request):
                                   checked=include_expired, cls="checkbox"),
                             Span("包含已过期", cls="label-text ml-2"),
                             cls="cursor-pointer flex items-center"
+                        ),
+                        Div(
+                            Label("绑定周期:", cls="label label-text font-semibold mr-2"),
+                            Select(
+                                Option("全部", value="", selected=(plan_days_filter is None)),
+                                Option("7 天", value="7", selected=(plan_days_filter == 7)),
+                                Option("23 天", value="23", selected=(plan_days_filter == 23)),
+                                Option("30 天", value="30", selected=(plan_days_filter == 30)),
+                                name="plan_days",
+                                cls="select select-bordered select-sm"
+                            ),
+                            cls="flex items-center"
                         ),
                         cls="flex gap-4"
                     ),
@@ -160,6 +176,7 @@ async def binding_codes_list(request: Request):
                         Th("绑定商户"),
                         Th("创建时间"),
                         Th("过期时间"),
+                        Th("绑定周期"),
                         Th("使用时间"),
                         Th("操作", cls="w-32")
                     )
@@ -270,7 +287,7 @@ async def binding_codes_generate_page(request: Request):
                     cls="form-control mb-4"
                 ),
                 
-                # 过期设置
+                # 过期设置（失效时间，单位小时；与发布后的周期无关）
                 Div(
                     Label("过期时间:", cls="label label-text font-semibold"),
                     Select(
@@ -282,6 +299,21 @@ async def binding_codes_generate_page(request: Request):
                         name="expiry_hours",
                         cls="select select-bordered"
                     ),
+                    cls="form-control mb-6"
+                ),
+
+                # 绑定周期（发布后自动计算到期天数：7/23/30）
+                Div(
+                    Label("绑定周期(发布后)", cls="label label-text font-semibold"),
+                    Select(
+                        Option("不设置", value=""),
+                        Option("7 天(首周)", value="7"),
+                        Option("23 天(续费)", value="23"),
+                        Option("30 天(整月)", value="30"),
+                        name="plan_days",
+                        cls="select select-bordered"
+                    ),
+                    Div("用于计算发布后的到期日，不体现在绑定码文本中。", cls="text-sm text-gray-500 mt-1"),
                     cls="form-control mb-6"
                 ),
                 
@@ -349,13 +381,20 @@ async def binding_codes_generate_action(request: Request):
         if count < 1 or count > 100:
             raise ValueError("生成数量必须在1-100之间")
         
-        # 此时 expiry_hours 已是 None 或 int
-        
+        # 绑定周期 plan_days（7/23/30），用于“发布后”自动计算过期时间
+        plan_days = None
+        raw_plan = form_data.get("plan_days")
+        if raw_plan:
+            s = str(raw_plan).strip()
+            if s.isdigit():
+                plan_days = int(s)
+
         # 生成绑定码
         generated_codes = []
         for i in range(count):
             code_info = await binding_codes_manager.generate_binding_code(
-                expiry_hours=expiry_hours
+                expiry_hours=expiry_hours,
+                plan_days=plan_days
             )
             generated_codes.append(code_info)
         

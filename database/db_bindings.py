@@ -27,7 +27,7 @@ class BindingCodesDatabase:
     DEFAULT_EXPIRY_HOURS = 24  # 默认过期时间（小时）
     
     @staticmethod
-    async def generate_binding_code(expiry_hours: Optional[int] = None) -> str:
+    async def generate_binding_code(expiry_hours: Optional[int] = None, plan_days: Optional[int] = None, plan_tag: Optional[str] = None) -> str:
         """
         生成新的绑定码
         
@@ -47,7 +47,7 @@ class BindingCodesDatabase:
             # 计算过期时间
             expires_at = datetime.now() + timedelta(hours=expiry_hours)
             
-            # 生成唯一绑定码
+            # 生成唯一绑定码（为管理员隐藏设置绑定周期 plan_days；不体现在码值里）
             max_attempts = 10
             for attempt in range(max_attempts):
                 # 生成随机码
@@ -61,14 +61,19 @@ class BindingCodesDatabase:
                 if not existing:
                     # 插入新绑定码，明确设置is_used=0
                     insert_query = """
-                        INSERT INTO binding_codes (code, is_used, expires_at)
-                        VALUES (?, 0, ?)
+                        INSERT INTO binding_codes (code, is_used, expires_at, plan_days, plan_tag)
+                        VALUES (?, 0, ?, ?, ?)
                     """
                     
-                    await db_manager.execute_query(insert_query, (code, expires_at))
+                    await db_manager.execute_query(insert_query, (code, expires_at, plan_days, plan_tag))
                     
-                    logger.info(f"成功生成绑定码: {code}, 过期时间: {expires_at}")
-                    return code
+                    logger.info(f"成功生成绑定码: {code}, 过期时间: {expires_at}, 周期: {plan_days}")
+                    return {
+                        'code': code,
+                        'expires_at': expires_at.isoformat(),
+                        'plan_days': plan_days,
+                        'plan_tag': plan_tag
+                    }
             
             # 如果多次尝试都失败，抛出异常
             raise Exception(f"生成唯一绑定码失败，已尝试 {max_attempts} 次")
@@ -77,6 +82,29 @@ class BindingCodesDatabase:
             logger.error(f"生成绑定码失败: {e}")
             raise
     
+    @staticmethod
+    async def get_last_used_plan_days(merchant_id: int) -> Optional[int]:
+        """获取该商户最近一次已使用绑定码的 plan_days。"""
+        try:
+            query = """
+                SELECT plan_days
+                FROM binding_codes
+                WHERE merchant_id = ? AND is_used = 1 AND plan_days IS NOT NULL
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT 1
+            """
+            row = await db_manager.fetch_one(query, (merchant_id,))
+            if row and row[0]:
+                try:
+                    val = int(row[0])
+                    return val if val > 0 else None
+                except Exception:
+                    return None
+            return None
+        except Exception as e:
+            logger.error(f"获取最近 plan_days 失败: {e}")
+            return None
+
     @staticmethod
     async def _check_code_exists(code: str) -> bool:
         """
@@ -333,7 +361,8 @@ class BindingCodesDatabase:
     async def get_all_binding_codes(
         include_used: bool = True,
         include_expired: bool = False,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        plan_days: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         获取所有绑定码列表
@@ -363,6 +392,10 @@ class BindingCodesDatabase:
                 query += " AND (bc.expires_at IS NULL OR bc.expires_at > ?)"
                 params.append(datetime.now())
             
+            if plan_days is not None:
+                query += " AND bc.plan_days = ?"
+                params.append(int(plan_days))
+
             query += " ORDER BY bc.created_at DESC"
             
             if limit:
@@ -561,5 +594,6 @@ class BindingCodesDatabase:
             logger.error(f"延长绑定码有效期失败: {e}")
             raise
 
-# 创建全局实例
+# 创建全局实例与兼容别名
 binding_codes_db = BindingCodesDatabase()
+binding_codes_manager = BindingCodesDatabase
