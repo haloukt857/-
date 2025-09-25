@@ -368,7 +368,10 @@ async def binding_codes_generate_action(request: Request):
         expiry_hours = None
         if raw_expiry is not None:
             s = str(raw_expiry).strip()
-            if s and s not in ("永不过期", "none", "null", "-1"):
+            if s == "":
+                # 显式永不过期
+                expiry_hours = 0
+            elif s and s not in ("永不过期", "none", "null", "-1"):
                 if s.isdigit():
                     expiry_hours = int(s)
                 else:

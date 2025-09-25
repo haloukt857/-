@@ -115,6 +115,11 @@ async def _finalize_and_back_to_menu(state: FSMContext, bot: Bot, chat_id: int, 
             await state.update_data(user_message_ids=[])
         except Exception:
             pass
+        # 清空状态，确保主面板不等待任何输入
+        try:
+            await state.clear()
+        except Exception:
+            pass
         # 回到面板（原位编辑）
         await show_profile_panel_like_user(message_obj, user_id, state)
     except Exception:
@@ -314,8 +319,6 @@ class BindingFlowManager:
                     buttons.append([InlineKeyboardButton(text="➡️ 选择发布时间", callback_data="binding_confirm_step9")])
                     # 关键词保存（用于资料编辑，可选）
                     buttons.append([InlineKeyboardButton(text="💾 保存关键词", callback_data="binding_keywords_save")])
-                    # 返回菜单
-                    buttons.append([InlineKeyboardButton(text="⬅️ 返回菜单", callback_data="merchant_back_to_menu")])
                 elif step_number == 9:
                     # 先选择最近5天日期，再选择管理员配置的时间
                     from datetime import datetime, timedelta
@@ -345,8 +348,7 @@ class BindingFlowManager:
                                 buttons.append([InlineKeyboardButton(text=label, callback_data="noop")])
                             else:
                                 buttons.append([InlineKeyboardButton(text=f"{sel}{option['text']}", callback_data=f"binding_step9_{time_val}")])
-                    # 返回菜单
-                    buttons.append([InlineKeyboardButton(text="⬅️ 返回菜单", callback_data="merchant_back_to_menu")])
+                    # 不在此处重复添加返回按钮，统一在下方追加
                 elif step_number == 10:
                     # 上传媒体说明 + 完成按钮 + 返回菜单
                     # 统计已上传数量
@@ -360,8 +362,6 @@ class BindingFlowManager:
                         count = 0
                     text += f"\n\n当前已上传：{count}/6\n直接发送照片或视频即可（最多6个）。"
                     buttons.append([InlineKeyboardButton(text="✅ 完成上传", callback_data="binding_media_done")])
-                    if step_number > 1:
-                        buttons.append([InlineKeyboardButton(text="⬅️ 返回菜单", callback_data="merchant_back_to_menu")])
                 else:
                     # 普通单选（步骤2,3）
                     for option in options:
@@ -1694,6 +1694,12 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                     await callback.answer(f"还差 {6 - count if count < 6 else 0} 个媒体，需正好6个", show_alert=True)
                     if merchant_handler and merchant_handler.binding_flow_manager:
                         await merchant_handler.binding_flow_manager.show_step(callback, user_choices, 10)
+                        # 进入媒体上传状态
+                        try:
+                            await state.set_state(MerchantStates.uploading_media)
+                            await state.update_data(media_status_mid=int(callback.message.message_id))
+                        except Exception:
+                            pass
                     return
                 # 已满足媒体要求：若已选择日期时间，回到步骤9供确认；否则提示先选择时间
                 if user_choices.get('publish_date') and user_choices.get('publish_time_str'):
@@ -1959,7 +1965,7 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
         logger.error(f"处理回调失败: {e}", exc_info=True)
         await callback.answer("处理失败，请重试", show_alert=True)
 
-@merchant_router.message(StateFilter(
+@merchant_router.message(F.text, StateFilter(
     MerchantStates.entering_name,
     MerchantStates.entering_contact_info,
     MerchantStates.entering_p_price,
@@ -2138,12 +2144,8 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-            # 统一交互：不自动导航，直接回资料面板
-            await _clear_prompt_messages(state, message.bot, message.chat.id)
-            try:
-                await show_profile_panel_like_user(message, user_id, state)
-            except Exception:
-                pass
+            # 统一交互：清理并回资料面板（同时清空状态）
+            await _finalize_and_back_to_menu(state, message.bot, message.chat.id, message, user_id)
             return
 
         # 未匹配：兜底
@@ -2184,7 +2186,7 @@ def get_merchant_router() -> Router:
 
 # ====== 辅助：商户上传媒体与设置频道 ======
 
-@merchant_router.message(F.photo)
+@merchant_router.message(F.photo, StateFilter(MerchantStates.uploading_media))
 async def handle_merchant_photo_upload(message: Message, state: FSMContext):
     try:
         user_id = message.from_user.id
@@ -2217,12 +2219,40 @@ async def handle_merchant_photo_upload(message: Message, state: FSMContext):
                     await db_manager.execute_query("DELETE FROM media WHERE id = ?", (row['id'],))
         except Exception:
             pass
-        await message.answer("✅ 图片已保存。可连续发送多张；完成后可在后台查看。")
+        # 更新状态消息而不是反复弹提示
+        try:
+            total = len(await media_db.get_media_by_merchant_id(merchant['id']))
+        except Exception:
+            total = 0
+        try:
+            data = await state.get_data()
+            mid = int(data.get('media_status_mid') or 0)
+            if mid:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ 完成上传", callback_data="merchant_media_done")],
+                    [InlineKeyboardButton(text="⬅️ 返回菜单", callback_data="merchant_back_to_menu")]
+                ])
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=mid,
+                    text=(
+                        f"请直接发送照片或视频给我（当前已有 {total} 个）。\n"
+                        f"最多保存6个，超出将覆盖旧排序。完成后点击“完成上传”。"
+                    ),
+                    reply_markup=kb
+                )
+        except Exception:
+            pass
+
+        if total >= 6:
+            # 自动完成并返回主面板（不再额外发送提示消息）
+            await _finalize_and_back_to_menu(state, message.bot, message.chat.id, message, user_id)
     except Exception as e:
         logger.error(f"保存图片失败: {e}")
         await message.answer("保存图片失败，请重试")
 
-@merchant_router.message(F.video)
+@merchant_router.message(F.video, StateFilter(MerchantStates.uploading_media))
 async def handle_merchant_video_upload(message: Message, state: FSMContext):
     try:
         user_id = message.from_user.id
@@ -2254,7 +2284,34 @@ async def handle_merchant_video_upload(message: Message, state: FSMContext):
                     await db_manager.execute_query("DELETE FROM media WHERE id = ?", (row['id'],))
         except Exception:
             pass
-        await message.answer("✅ 视频已保存。完成后可在后台查看。")
+        # 更新状态消息而不是反复弹提示
+        try:
+            total = len(await media_db.get_media_by_merchant_id(merchant['id']))
+        except Exception:
+            total = 0
+        try:
+            data = await state.get_data()
+            mid = int(data.get('media_status_mid') or 0)
+            if mid:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ 完成上传", callback_data="merchant_media_done")],
+                    [InlineKeyboardButton(text="⬅️ 返回菜单", callback_data="merchant_back_to_menu")]
+                ])
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=mid,
+                    text=(
+                        f"请直接发送照片或视频给我（当前已有 {total} 个）。\n"
+                        f"最多保存6个，超出将覆盖旧排序。完成后点击“完成上传”。"
+                    ),
+                    reply_markup=kb
+                )
+        except Exception:
+            pass
+
+        if total >= 6:
+            await _finalize_and_back_to_menu(state, message.bot, message.chat.id, message, user_id)
     except Exception as e:
         logger.error(f"保存视频失败: {e}")
         await message.answer("保存视频失败，请重试")
@@ -2270,11 +2327,22 @@ async def merchant_edit_media(callback: CallbackQuery, state: FSMContext):
             return
         existing = await media_db.get_media_by_merchant_id(merchant['id'])
         count = len(existing)
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ 完成上传", callback_data="merchant_media_done")]])
-        await callback.message.answer(
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ 完成上传", callback_data="merchant_media_done")],
+            [InlineKeyboardButton(text="⬅️ 返回菜单", callback_data="merchant_back_to_menu")]
+        ])
+        # 进入媒体上传状态
+        await state.set_state(MerchantStates.uploading_media)
+        m = await callback.message.answer(
             f"请直接发送照片或视频给我（当前已有 {count} 个）。\n最多保存6个，超出将覆盖旧排序。完成后点击“完成上传”。",
             reply_markup=kb
         )
+        # 记录状态消息ID，后续编辑；并加入可清理的提示列表
+        try:
+            await state.update_data(media_status_mid=int(m.message_id))
+            await _push_prompt_message(state, m.message_id)
+        except Exception:
+            pass
         await callback.answer()
     except Exception as e:
         logger.error(f"进入媒体管理失败: {e}")
@@ -2286,6 +2354,10 @@ async def merchant_media_done(callback: CallbackQuery, state: FSMContext):
         user_id = callback.from_user.id
         merchant = await MerchantManager.get_merchant_by_chat_id(user_id)
         existing = await media_db.get_media_by_merchant_id(merchant['id']) if merchant else []
+        try:
+            await state.clear()
+        except Exception:
+            pass
         try:
             await show_profile_panel_like_user(callback.message, user_id, state)
         except Exception:
@@ -2395,3 +2467,5 @@ async def merchant_back_to_menu(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"返回菜单失败: {e}")
         await callback.answer("返回失败", show_alert=True)
+
+    

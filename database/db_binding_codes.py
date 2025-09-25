@@ -26,7 +26,11 @@ class BindingCodesManager:
     DEFAULT_EXPIRY_HOURS = 24  # 默认过期时间（小时）
 
     @staticmethod
-    async def generate_binding_code(expiry_hours: Optional[int] = None) -> Dict[str, Any]:
+    async def generate_binding_code(
+        expiry_hours: Optional[int] = None,
+        plan_days: Optional[int] = None,
+        plan_tag: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         生成新的绑定码
         
@@ -40,11 +44,10 @@ class BindingCodesManager:
             Exception: 生成绑定码失败时
         """
         try:
-            if expiry_hours is None:
-                expiry_hours = BindingCodesManager.DEFAULT_EXPIRY_HOURS
-            
             # 计算过期时间
-            expires_at = datetime.now() + timedelta(hours=expiry_hours) if expiry_hours > 0 else None
+            # 约定：expiry_hours <= 0 表示永不过期；None 表示使用默认24小时
+            hours = BindingCodesManager.DEFAULT_EXPIRY_HOURS if expiry_hours is None else int(expiry_hours)
+            expires_at = (datetime.now() + timedelta(hours=hours)) if hours > 0 else None
             
             # 生成唯一绑定码
             max_attempts = 10
@@ -60,11 +63,11 @@ class BindingCodesManager:
                 if not existing:
                     # 插入新绑定码，包含过期时间
                     insert_query = """
-                        INSERT INTO binding_codes (code, is_used, created_at, expires_at)
-                        VALUES (?, FALSE, CURRENT_TIMESTAMP, ?)
+                        INSERT INTO binding_codes (code, is_used, created_at, expires_at, plan_days, plan_tag)
+                        VALUES (?, FALSE, CURRENT_TIMESTAMP, ?, ?, ?)
                     """
                     
-                    await db_manager.execute_query(insert_query, (code, expires_at))
+                    await db_manager.execute_query(insert_query, (code, expires_at, plan_days, plan_tag))
                     
                     # 获取插入的记录ID
                     get_id_query = "SELECT id, created_at FROM binding_codes WHERE code = ?"
@@ -77,7 +80,9 @@ class BindingCodesManager:
                         'created_at': result['created_at'] if result else datetime.now().isoformat(),
                         'expires_at': expires_at.isoformat() if expires_at else None,
                         'used_at': None,
-                        'merchant_id': None
+                        'merchant_id': None,
+                        'plan_days': plan_days,
+                        'plan_tag': plan_tag
                     }
                     
                     logger.info(f"成功生成绑定码: {code}")
@@ -152,7 +157,8 @@ class BindingCodesManager:
     async def get_all_binding_codes(
         include_used: bool = True,
         include_expired: bool = False,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        plan_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         获取所有绑定码列表
@@ -185,6 +191,11 @@ class BindingCodesManager:
             if not include_expired:
                 query += " AND (bc.expires_at IS NULL OR bc.expires_at > CURRENT_TIMESTAMP)"
             
+            # 绑定周期筛选（可选）
+            if plan_days is not None:
+                query += " AND bc.plan_days = ?"
+                params.append(int(plan_days))
+            
             query += " ORDER BY bc.created_at DESC"
             
             if limit:
@@ -209,6 +220,9 @@ class BindingCodesManager:
             
             if not include_expired:
                 count_query += " AND (bc.expires_at IS NULL OR bc.expires_at > CURRENT_TIMESTAMP)"
+            if plan_days is not None:
+                count_query += " AND bc.plan_days = ?"
+                count_params.append(int(plan_days))
                 
             count_result = await db_manager.fetch_one(count_query, tuple(count_params))
             total_count = count_result['total'] if count_result else 0

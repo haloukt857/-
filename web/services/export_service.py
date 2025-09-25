@@ -242,7 +242,8 @@ class ExportService:
             from database.db_binding_codes import binding_codes_manager
             
             # 获取绑定码数据
-            binding_codes = await binding_codes_manager.get_all_binding_codes()
+            result = await binding_codes_manager.get_all_binding_codes()
+            binding_codes = (result or {}).get('codes', result or [])
             
             # 定义CSV列头
             headers = [

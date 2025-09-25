@@ -401,9 +401,10 @@ class StatisticsEngine:
             binding_stats = await BindingCodesDatabase.get_binding_code_statistics()
 
             # 获取所有绑定码
-            all_codes = await BindingCodesDatabase.get_all_binding_codes(
+            result = await BindingCodesDatabase.get_all_binding_codes(
                 include_used=True, include_expired=True
             )
+            all_codes = (result or {}).get('codes', [])
 
             # 时间范围内的绑定码
             period_codes = [

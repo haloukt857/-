@@ -82,6 +82,9 @@ class MerchantStates(StatesGroup):
     # 步骤9：选择发布时间（日期+时间槽）
     selecting_publish_time = State()
 
+    # 管理媒体（等待用户发送图片/视频）
+    uploading_media = State()
+
 
 class MerchantOnboardingStates(StatesGroup):
     """商户信息提交流程状态（详细分步）"""

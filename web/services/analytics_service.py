@@ -537,10 +537,11 @@ class AnalyticsService:
         """
         try:
             # 获取所有绑定码数据
-            all_codes = await binding_codes_manager.get_all_binding_codes(
+            result = await binding_codes_manager.get_all_binding_codes(
                 include_used=True, 
                 include_expired=True
             )
+            all_codes = (result or {}).get('codes', [])
             
             if not all_codes:
                 return {

@@ -228,7 +228,13 @@ async def healthcheck():
 
 # 在Web进程内启动调度器（单服务部署时使用）
 try:
-    enable_scheduler = os.getenv('SCHEDULER_ENABLED', 'true').lower() == 'true'
+    # 本地(dev)默认不启动；云端/生产默认启动。可通过 SCHEDULER_ENABLED 显式覆盖。
+    _sched_env = os.getenv('SCHEDULER_ENABLED')
+    if _sched_env is None:
+        enable_scheduler = os.getenv('RUN_MODE', 'dev').lower() != 'dev'
+    else:
+        enable_scheduler = _sched_env.lower() == 'true'
+
     if enable_scheduler:
         from scheduler import SchedulerWorker
         _worker = SchedulerWorker()
@@ -239,44 +245,49 @@ try:
             logger.info("Scheduler 已挂接到 Web 应用的启动/停止事件")
         except Exception as e:
             logger.warning(f"注册调度器事件失败（将忽略）：{e}")
+    else:
+        logger.info("SCHEDULER: 开发/本地模式默认不启动（可用 SCHEDULER_ENABLED=true 覆盖）")
 except Exception:
     pass
 
-# 集成 Telegram Webhook 到同一 Web 进程（Aiogram v3）
+# 集成 Telegram Webhook 到同一 Web 进程（仅在 Webhook 模式/云端生效）
 try:
-    from bot import TelegramMerchantBot
-    from aiogram.types import Update
+    if bot_config.use_webhook:
+        from bot import TelegramMerchantBot
+        from aiogram.types import Update
 
-    _bot_instance = TelegramMerchantBot()
+        _bot_instance = TelegramMerchantBot()
 
-    async def _bot_startup():
-        try:
-            await _bot_instance._on_startup()
-            logger.info("Bot 已随 Web 应用启动 (Webhook 模式)")
-        except Exception as e:
-            logger.error(f"Bot 启动失败: {e}")
+        async def _bot_startup():
+            try:
+                await _bot_instance._on_startup()
+                logger.info("Bot 已随 Web 应用启动 (Webhook 模式)")
+            except Exception as e:
+                logger.error(f"Bot 启动失败: {e}")
 
-    async def _bot_shutdown():
-        try:
-            await _bot_instance._on_shutdown()
-            logger.info("Bot 已随 Web 应用关闭")
-        except Exception as e:
-            logger.error(f"Bot 关闭失败: {e}")
+        async def _bot_shutdown():
+            try:
+                await _bot_instance._on_shutdown()
+                logger.info("Bot 已随 Web 应用关闭")
+            except Exception as e:
+                logger.error(f"Bot 关闭失败: {e}")
 
-    app.add_event_handler('startup', lambda: asyncio.create_task(_bot_startup()))
-    app.add_event_handler('shutdown', lambda: asyncio.create_task(_bot_shutdown()))
+        app.add_event_handler('startup', lambda: asyncio.create_task(_bot_startup()))
+        app.add_event_handler('shutdown', lambda: asyncio.create_task(_bot_shutdown()))
 
-    @app.post(bot_config.webhook_path)
-    async def telegram_webhook(request: Request):
-        try:
-            payload = await request.json()
-            update = Update.model_validate(payload)
-            await _bot_instance.dp.feed_update(_bot_instance.bot, update)
-            return JSONResponse({"ok": True})
-        except Exception as e:
-            logger.error(f"Webhook 处理失败: {e}")
-            return JSONResponse({"ok": False, "error": str(e)}, status_code=200)
-    logger.info(f"已注册 Telegram Webhook 路由: {bot_config.webhook_path}")
+        @app.post(bot_config.webhook_path)
+        async def telegram_webhook(request: Request):
+            try:
+                payload = await request.json()
+                update = Update.model_validate(payload)
+                await _bot_instance.dp.feed_update(_bot_instance.bot, update)
+                return JSONResponse({"ok": True})
+            except Exception as e:
+                logger.error(f"Webhook 处理失败: {e}")
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=200)
+        logger.info(f"已注册 Telegram Webhook 路由: {bot_config.webhook_path}")
+    else:
+        logger.info("Webhook: 开发/本地模式 (USE_WEBHOOK=false)，不在 Web 应用中集成。")
 except Exception as e:
     logger.error(f"集成 Telegram Webhook 失败: {e}")
 __all__ = ['app']
