@@ -36,6 +36,16 @@ def _build_channel_post_link(channel_chat_id: str, message_id: int) -> Optional[
         return None
 
 
+def _score_bar(score: Optional[int], width: int = 10, filled: str = '■', empty: str = '□') -> str:
+    """将评分(0-10)渲染为条形图，例：[■■■■■□□□□□]。"""
+    try:
+        s = int(score or 0)
+    except Exception:
+        s = 0
+    s = max(0, min(width, s))
+    return f"[{filled * s}{empty * (width - s)}]"
+
+
 class ReviewPublishService:
     @staticmethod
     async def publish_u2m(review_id: int, bot: Bot, re_publish: bool = False) -> bool:
@@ -63,11 +73,11 @@ class ReviewPublishService:
                 f"商户：{merchant_name}",
                 f"用户：{user_disp}",
                 "",
-                f"外貌：{review.get('rating_appearance')} 分",
-                f"身材：{review.get('rating_figure')} 分",
-                f"服务：{review.get('rating_service')} 分",
-                f"态度：{review.get('rating_attitude')} 分",
-                f"环境：{review.get('rating_environment')} 分",
+                f"🧏🏻‍♀️外貌：{review.get('rating_appearance')} 分  {_score_bar(review.get('rating_appearance'))}",
+                f"💃🏻身材：{review.get('rating_figure')} 分  {_score_bar(review.get('rating_figure'))}",
+                f"🏵️服务：{review.get('rating_service')} 分  {_score_bar(review.get('rating_service'))}",
+                f"🈺态度：{review.get('rating_attitude')} 分  {_score_bar(review.get('rating_attitude'))}",
+                f"🛏️环境：{review.get('rating_environment')} 分  {_score_bar(review.get('rating_environment'))}",
             ]
             if review.get('text_review_by_user'):
                 text_lines.append("")
@@ -75,7 +85,7 @@ class ReviewPublishService:
             text = "\n".join(text_lines)
 
             chat_id = channel.get('channel_chat_id')
-            sent = await bot.send_message(chat_id, text)
+            sent = await bot.send_message(chat_id, text, parse_mode=None)
             link = _build_channel_post_link(str(chat_id), sent.message_id)
             await u2m_reviews_manager.set_report_meta(review_id, message_id=sent.message_id, url=link, published_at=sent.date)
             return True
@@ -118,11 +128,11 @@ class ReviewPublishService:
                 f"商户：{merchant_name}",  # 仅网名，不带 @
                 f"用户：{user_disp}",
                 "",
-                f"出击素质：{review.get('rating_attack_quality')} 分",
-                f"长度：{review.get('rating_length')} 分",
-                f"硬度：{review.get('rating_hardness')} 分",
-                f"时间：{review.get('rating_duration')} 分",
-                f"用户气质：{review.get('rating_user_temperament')} 分",
+                f"出击素质：{review.get('rating_attack_quality')} 分  {_score_bar(review.get('rating_attack_quality'))}",
+                f"长度：{review.get('rating_length')} 分  {_score_bar(review.get('rating_length'))}",
+                f"硬度：{review.get('rating_hardness')} 分  {_score_bar(review.get('rating_hardness'))}",
+                f"时间：{review.get('rating_duration')} 分  {_score_bar(review.get('rating_duration'))}",
+                f"用户气质：{review.get('rating_user_temperament')} 分  {_score_bar(review.get('rating_user_temperament'))}",
             ]
             if review.get('text_review_by_merchant'):
                 text_lines.append("")
@@ -130,7 +140,7 @@ class ReviewPublishService:
             text = "\n".join(text_lines)
 
             chat_id = channel.get('channel_chat_id')
-            sent = await bot.send_message(chat_id, text)
+            sent = await bot.send_message(chat_id, text, parse_mode=None)
             link = _build_channel_post_link(str(chat_id), sent.message_id)
             await merchant_reviews_manager.set_report_meta(review_id, message_id=sent.message_id, url=link, published_at=sent.date)
             return True
