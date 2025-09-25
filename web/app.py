@@ -7,6 +7,8 @@
 import logging
 import os
 from fasthtml.common import *
+import os
+import asyncio
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import RedirectResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -223,4 +225,20 @@ logger.info("所有路由已注册完成")
 @app.get("/health")
 async def healthcheck():
     return JSONResponse({"status": "ok"})
+
+# 在Web进程内启动调度器（单服务部署时使用）
+try:
+    enable_scheduler = os.getenv('SCHEDULER_ENABLED', 'true').lower() == 'true'
+    if enable_scheduler:
+        from scheduler import SchedulerWorker
+        _worker = SchedulerWorker()
+        # 使用 Starlette 事件钩子启动/停止调度器
+        try:
+            app.add_event_handler('startup', lambda: asyncio.create_task(_worker.start()))
+            app.add_event_handler('shutdown', lambda: asyncio.create_task(_worker.stop()))
+            logger.info("Scheduler 已挂接到 Web 应用的启动/停止事件")
+        except Exception as e:
+            logger.warning(f"注册调度器事件失败（将忽略）：{e}")
+except Exception:
+    pass
 __all__ = ['app']

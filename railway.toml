@@ -13,9 +13,7 @@ healthcheckPath = "/health"
 healthcheckTimeout = 30
 
 # Worker 进程：定时任务调度器
-[deploy.worker]
-command = "python3 scheduler.py"
-restartPolicyType = "on-failure"
+## 已改为单服务部署：调度器在 web 进程内启动（SCHEDULER_ENABLED=true）
 
 [[deploy.hooks]]
 stage = "post-deploy"
