@@ -911,7 +911,25 @@ async def generate_code_command(message: Message):
 使用 /view_stats 查看绑定码使用情况
             """
 
-            await message.reply(code_message, parse_mode=None)
+            # 构建“复制绑定码”按钮（优先使用 Bot API 原生复制按钮，降级为回调提示）
+            kb = None
+            try:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                try:
+                    # Bot API 支持的复制按钮（新版客户端生效）
+                    from aiogram.types import CopyTextButton
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text="📋 复制绑定码", copy_text=CopyTextButton(text=code_info.get('code', '')))]]
+                    )
+                except Exception:
+                    # 降级回调按钮：点击后弹出包含绑定码的提示
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text="📋 复制绑定码", callback_data=f"copy_code:{code_info.get('code','')}")]]
+                    )
+            except Exception:
+                kb = None
+
+            await message.reply(code_message, parse_mode=None, reply_markup=kb)
 
             # 记录绑定码生成
             await activity_logs_db.log_admin_action(
@@ -932,6 +950,18 @@ async def generate_code_command(message: Message):
         logger.error(f"生成绑定码失败: {e}")
         error_text = await get_template_async("error_general")
         await message.reply(error_text)
+
+
+@admin_router.callback_query(F.data.startswith("copy_code:"))
+async def copy_code_callback(callback: CallbackQuery):
+    """降级方案：当客户端或库不支持原生复制按钮时，使用回调弹窗便于复制。"""
+    try:
+        code = callback.data.split(":", 1)[1]
+        # 弹窗显示绑定码，用户可在弹窗中长按复制（Telegram 客户端支持）
+        await callback.answer(f"绑定码: {code}", show_alert=True)
+    except Exception as e:
+        logger.warning(f"复制绑定码回调失败: {e}")
+        await callback.answer("复制失败，请手动长按消息复制", show_alert=True)
 
 
 @admin_router.message(Command("manage_regions"))
