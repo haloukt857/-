@@ -2,15 +2,15 @@
 builder = "nixpacks"
 
 [deploy]
-checkTimeout = 300
-healthcheckPath = "/health"
-healthcheckTimeout = 30
 restartPolicyType = "never"
 
 # Web 进程：ASGI 应用（Bot Webhook + 管理面板由 asgi_app/main.py 提供）
 [deploy.web]
 command = "python3 main.py"
 restartPolicyType = "on-failure"
+checkTimeout = 300
+healthcheckPath = "/health"
+healthcheckTimeout = 30
 
 # Worker 进程：定时任务调度器
 [deploy.worker]
