@@ -19,7 +19,7 @@ from starlette.requests import Request
 from .layout import create_layout
 
 # 导入配置
-from config import WEB_CONFIG
+from config import WEB_CONFIG, bot_config
 
 # 导入所有路由模块
 from .routes import (
@@ -241,4 +241,42 @@ try:
             logger.warning(f"注册调度器事件失败（将忽略）：{e}")
 except Exception:
     pass
+
+# 集成 Telegram Webhook 到同一 Web 进程（Aiogram v3）
+try:
+    from bot import TelegramMerchantBot
+    from aiogram.types import Update
+
+    _bot_instance = TelegramMerchantBot()
+
+    async def _bot_startup():
+        try:
+            await _bot_instance._on_startup()
+            logger.info("Bot 已随 Web 应用启动 (Webhook 模式)")
+        except Exception as e:
+            logger.error(f"Bot 启动失败: {e}")
+
+    async def _bot_shutdown():
+        try:
+            await _bot_instance._on_shutdown()
+            logger.info("Bot 已随 Web 应用关闭")
+        except Exception as e:
+            logger.error(f"Bot 关闭失败: {e}")
+
+    app.add_event_handler('startup', lambda: asyncio.create_task(_bot_startup()))
+    app.add_event_handler('shutdown', lambda: asyncio.create_task(_bot_shutdown()))
+
+    @app.post(bot_config.webhook_path)
+    async def telegram_webhook(request: Request):
+        try:
+            payload = await request.json()
+            update = Update.model_validate(payload)
+            await _bot_instance.dp.feed_update(_bot_instance.bot, update)
+            return JSONResponse({"ok": True})
+        except Exception as e:
+            logger.error(f"Webhook 处理失败: {e}")
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=200)
+    logger.info(f"已注册 Telegram Webhook 路由: {bot_config.webhook_path}")
+except Exception as e:
+    logger.error(f"集成 Telegram Webhook 失败: {e}")
 __all__ = ['app']
