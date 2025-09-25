@@ -25,6 +25,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # APScheduler相关导入
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
@@ -36,6 +37,7 @@ from database.db_orders import OrderManager
 from database.db_merchants import MerchantManager
 from database.db_system_config import system_config_manager
 from database.db_channels import posting_channels_db
+from database.db_scheduling import posting_time_slots_db
 from database.db_media import media_db
 from config import BOT_TOKEN
 import aiohttp
@@ -85,6 +87,10 @@ class SchedulerWorker:
         # 添加事件监听器
         self.scheduler.add_listener(self._job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
         
+        # 动态时间槽调度相关
+        self._slot_job_ids = set()
+        self._time_slot_signature = None
+
         logger.info("APScheduler调度器Worker初始化完成")
     
     def _job_listener(self, event):
@@ -534,15 +540,9 @@ class SchedulerWorker:
         )
         logger.info("已注册任务: 商家平均分计算 (每日3:00)")
         
-        # 任务2: 帖子自动发布 - 每分钟
-        self.scheduler.add_job(
-            func=self.publish_pending_posts,
-            trigger=CronTrigger(minute='*'),
-            id='publish_posts',
-            name='帖子自动发布',
-            replace_existing=True
-        )
-        logger.info("已注册任务: 帖子自动发布 (每分钟)")
+        # 任务2: 帖子自动发布 - 按时间槽动态注册（在 start() 中首次加载，并定时热更新）
+        # 注意：这里不再固定每分钟触发，改为读取DB的 posting_time_slots
+        logger.info("帖子自动发布将按‘时间槽配置’动态注册")
         
         # 任务3: 服务到期处理 - 每日1:00
         self.scheduler.add_job(
@@ -555,6 +555,72 @@ class SchedulerWorker:
         logger.info("已注册任务: 服务到期处理 (每日1:00)")
         
         logger.info("所有定时任务注册完成")
+
+    async def _load_active_time_slots(self):
+        """读取启用中的时间槽，返回规范化的 [(hour, minute)] 列表"""
+        try:
+            slots = await posting_time_slots_db.get_active_slots()
+            result = []
+            for s in slots or []:
+                t = (s.get('time_str') or '').strip()
+                if not t:
+                    continue
+                try:
+                    parts = t.split(':')
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 else 0
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        result.append((hour, minute))
+                except Exception:
+                    continue
+            # 去重并排序
+            result = sorted(set(result))
+            return result
+        except Exception as e:
+            logger.error(f"读取时间槽失败: {e}")
+            return []
+
+    def _compute_slots_signature(self, slots: list[tuple[int, int]]) -> str:
+        try:
+            return ','.join([f"{h:02d}:{m:02d}" for h, m in slots])
+        except Exception:
+            return ''
+
+    def _clear_slot_jobs(self):
+        for jid in list(self._slot_job_ids):
+            try:
+                self.scheduler.remove_job(jid)
+            except Exception:
+                pass
+        self._slot_job_ids.clear()
+
+    def _schedule_slot_jobs(self, slots: list[tuple[int, int]]):
+        for hour, minute in slots:
+            job_id = f"publish_posts_{hour:02d}{minute:02d}"
+            try:
+                self.scheduler.add_job(
+                    func=self.publish_pending_posts,
+                    trigger=CronTrigger(hour=hour, minute=minute),
+                    id=job_id,
+                    name=f"帖子自动发布 {hour:02d}:{minute:02d}",
+                    replace_existing=True
+                )
+                self._slot_job_ids.add(job_id)
+                logger.info(f"已注册时间槽任务: {hour:02d}:{minute:02d}")
+            except Exception as e:
+                logger.error(f"注册时间槽任务失败 {hour:02d}:{minute:02d}: {e}")
+
+    async def refresh_time_slot_jobs(self):
+        """热更新时间槽任务：当DB配置变化时，重载Cron任务"""
+        slots = await self._load_active_time_slots()
+        signature = self._compute_slots_signature(slots)
+        if signature != self._time_slot_signature:
+            logger.info(f"检测到时间槽变更，重载任务: {self._time_slot_signature} -> {signature}")
+            self._clear_slot_jobs()
+            self._schedule_slot_jobs(slots)
+            self._time_slot_signature = signature
+        else:
+            logger.debug("时间槽未变化，无需重载")
     
     async def start(self):
         """启动调度器Worker"""
@@ -566,8 +632,24 @@ class SchedulerWorker:
             if test_result:
                 logger.info("数据库连接测试成功")
             
-            # 注册定时任务
+            # 注册定时任务（静态任务）
             self.register_jobs()
+            
+            # 首次加载“时间槽”并注册动态任务
+            await self.refresh_time_slot_jobs()
+
+            # 定时刷新时间槽配置，支持热更新（每60秒检查一次）
+            try:
+                self.scheduler.add_job(
+                    func=self.refresh_time_slot_jobs,
+                    trigger=IntervalTrigger(seconds=60),
+                    id='refresh_time_slot_jobs',
+                    name='刷新时间槽配置',
+                    replace_existing=True
+                )
+                logger.info("已注册时间槽热更新任务 (每60秒)")
+            except Exception as e:
+                logger.error(f"注册时间槽热更新任务失败: {e}")
             
             # 启动调度器
             self.scheduler.start()
