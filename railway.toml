@@ -29,6 +29,8 @@ restartPolicyMaxRetries = 3
 RUN_MODE = "prod"
 DEBUG = "false"
 USE_WEBHOOK = "true"
+BOT_TOKEN = "8405793737:AAF0K4I_cs19TL-ED8-SYag_GNHIT5gAGSk"
+DEEPLINK_BOT_USERNAME = "baiduyuntestbot"
 
 [environments.staging]
 
