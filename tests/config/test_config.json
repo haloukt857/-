@@ -1,0 +1,67 @@
+{
+  "test_environment": "testing",
+  "log_level": "INFO",
+  "debug_mode": false,
+  "verbose_output": true,
+  "test_timeout": 300,
+  "module_timeout": 1800,
+  "suite_timeout": 7200,
+  "max_workers": 4,
+  "retry_attempts": 2,
+  "stop_on_failure": false,
+  "continue_on_error": true,
+  "enable_parallel_execution": true,
+  "max_parallel_modules": 3,
+  "module_isolation": true,
+  "cleanup_after_tests": true,
+  "preserve_test_data": false,
+  "reset_database": true,
+  "enable_performance_monitoring": true,
+  "enable_memory_profiling": false,
+  "enable_network_monitoring": true,
+  "enable_error_screenshots": false,
+  "disabled_modules": [],
+  "priority_modules": [
+    "admin_backend",
+    "merchant_onboarding", 
+    "post_lifecycle",
+    "user_experience",
+    "review_incentive"
+  ],
+  "database": {
+    "url": "sqlite:///data/test_marketing_bot.db",
+    "backup_url": "sqlite:///data/backup_marketing_bot.db",
+    "enable_wal_mode": true,
+    "timeout": 30,
+    "pool_size": 5,
+    "max_retries": 3
+  },
+  "telegram": {
+    "bot_token": "TEST_BOT_TOKEN",
+    "test_user_ids": [12345678, 87654321],
+    "test_chat_id": -1001234567890,
+    "api_timeout": 30,
+    "mock_api_calls": true
+  },
+  "performance": {
+    "concurrent_users": 10,
+    "max_requests_per_second": 100,
+    "memory_limit_mb": 512,
+    "cpu_limit_percent": 80,
+    "enable_profiling": false
+  },
+  "reporting": {
+    "output_dir": "tests/reports",
+    "include_screenshots": false,
+    "generate_html": true,
+    "generate_json": true,
+    "generate_xml": false,
+    "include_performance_metrics": true
+  },
+  "custom_settings": {
+    "test_description": "Telegram商户机器人V2.0综合测试",
+    "test_version": "2.0.0",
+    "author": "QA测试引擎",
+    "contact": "test@example.com"
+  }
+}

@@ -1,0 +1,619 @@
+"""
+关键词管理数据库操作类
+提供关键词的增删改查功能，支持动态关键词管理和多选功能
+"""
+
+import sqlite3
+import aiosqlite
+import json
+import logging
+from typing import List, Dict, Any, Optional
+from .db_connection import DatabaseManager
+from path_manager import PathManager
+
+logger = logging.getLogger(__name__)
+
+
+class KeywordDatabase:
+    """关键词数据库管理类"""
+
+    def __init__(self):
+        """初始化关键词数据库管理器"""
+        self.db_manager = DatabaseManager()
+        self.db_path = PathManager.get_db_path()
+
+    async def create_keyword(self, name: str, display_order: int = 0) -> int:
+        """
+        创建新关键词
+        
+        Args:
+            name: 关键词名称（通常2字）
+            display_order: 显示顺序
+            
+        Returns:
+            int: 新创建关键词的ID
+            
+        Raises:
+            sqlite3.IntegrityError: 如果关键词名称已存在
+        """
+        try:
+            # 验证关键词长度（推荐2个字符）
+            if len(name.strip()) == 0:
+                raise ValueError("关键词不能为空")
+            
+            if len(name.strip()) > 6:
+                raise ValueError("关键词长度不应超过6个字符")
+            
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    """
+                    INSERT INTO keywords (name, display_order, is_active, created_at, updated_at)
+                    VALUES (?, ?, TRUE, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (name.strip(), display_order)
+                )
+                keyword_id = cursor.lastrowid
+                await db.commit()
+                
+                logger.info(f"关键词创建成功: ID={keyword_id}, name={name}")
+                return keyword_id
+                
+        except sqlite3.IntegrityError as e:
+            logger.error(f"创建关键词失败 - 名称重复: {name}, error: {e}")
+            raise ValueError(f"关键词 '{name}' 已存在")
+        except Exception as e:
+            logger.error(f"创建关键词失败: {e}", exc_info=True)
+            raise
+
+    async def get_all_keywords(self, only_active: bool = True) -> List[Dict[str, Any]]:
+        """
+        获取所有关键词
+        
+        Args:
+            only_active: 是否只获取激活状态的关键词
+            
+        Returns:
+            List[Dict]: 关键词列表
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                where_clause = "WHERE is_active = TRUE" if only_active else ""
+                query = f"""
+                    SELECT id, name, is_active, created_at
+                    FROM keywords
+                    {where_clause}
+                    ORDER BY name ASC
+                """
+                
+                cursor = await db.execute(query)
+                rows = await cursor.fetchall()
+                
+                keywords = []
+                for row in rows:
+                    keywords.append({
+                        'id': row[0],
+                        'name': row[1],  # 使用实际的name字段
+                        'is_active': row[2],
+                        'created_at': row[3]
+                    })
+                
+                logger.debug(f"获取关键词列表成功，共 {len(keywords)} 个关键词")
+                return keywords
+                
+        except Exception as e:
+            logger.error(f"获取关键词列表失败: {e}", exc_info=True)
+            raise
+
+    async def get_keyword_by_id(self, keyword_id: int) -> Optional[Dict[str, Any]]:
+        """
+        根据ID获取关键词信息
+        
+        Args:
+            keyword_id: 关键词ID
+            
+        Returns:
+            Optional[Dict]: 关键词信息，不存在时返回None
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    """
+                    SELECT id, name, display_order, is_active, created_at, updated_at
+                    FROM keywords
+                    WHERE id = ?
+                    """,
+                    (keyword_id,)
+                )
+                row = await cursor.fetchone()
+                
+                if row:
+                    return {
+                        'id': row[0],
+                        'name': row[1],
+                        'display_order': row[2],
+                        'is_active': row[3],
+                        'created_at': row[4],
+                        'updated_at': row[5]
+                    }
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"获取关键词信息失败: keyword_id={keyword_id}, error: {e}", exc_info=True)
+            raise
+
+    async def get_keyword_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """
+        根据名称获取关键词信息
+        
+        Args:
+            name: 关键词名称
+            
+        Returns:
+            Optional[Dict]: 关键词信息，不存在时返回None
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    """
+                    SELECT id, name, display_order, is_active, created_at, updated_at
+                    FROM keywords
+                    WHERE name = ?
+                    """,
+                    (name,)
+                )
+                row = await cursor.fetchone()
+                
+                if row:
+                    return {
+                        'id': row[0],
+                        'name': row[1],
+                        'display_order': row[2],
+                        'is_active': row[3],
+                        'created_at': row[4],
+                        'updated_at': row[5]
+                    }
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"根据名称获取关键词失败: name={name}, error: {e}", exc_info=True)
+            raise
+
+    async def update_keyword(self, keyword_id: int, name: str = None, display_order: int = None, is_active: bool = None) -> bool:
+        """
+        更新关键词信息
+        
+        Args:
+            keyword_id: 关键词ID
+            name: 新的关键词名称（可选）
+            display_order: 新的显示顺序（可选）
+            is_active: 新的激活状态（可选）
+            
+        Returns:
+            bool: 更新是否成功
+        """
+        try:
+            # 构建动态更新语句
+            update_fields = []
+            params = []
+            
+            if name is not None:
+                # 验证关键词名称
+                name = name.strip()
+                if len(name) == 0:
+                    raise ValueError("关键词不能为空")
+                if len(name) > 6:
+                    raise ValueError("关键词长度不应超过6个字符")
+                
+                update_fields.append("name = ?")
+                params.append(name)
+            
+            if display_order is not None:
+                update_fields.append("display_order = ?")
+                params.append(display_order)
+            
+            if is_active is not None:
+                update_fields.append("is_active = ?")
+                params.append(is_active)
+            
+            if not update_fields:
+                logger.warning("更新关键词时没有提供任何更新字段")
+                return False
+            
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(keyword_id)
+            
+            query = f"""
+                UPDATE keywords 
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            """
+            
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(query, params)
+                await db.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"关键词更新成功: ID={keyword_id}")
+                    return True
+                else:
+                    logger.warning(f"关键词更新失败 - 未找到记录: ID={keyword_id}")
+                    return False
+                    
+        except sqlite3.IntegrityError as e:
+            logger.error(f"更新关键词失败 - 名称重复: ID={keyword_id}, name={name}, error: {e}")
+            raise ValueError(f"关键词 '{name}' 已存在")
+        except Exception as e:
+            logger.error(f"更新关键词失败: ID={keyword_id}, error: {e}", exc_info=True)
+            raise
+
+    async def delete_keyword(self, keyword_id: int) -> bool:
+        """
+        删除关键词（硬删除，直接从数据库中删除）
+        
+        Args:
+            keyword_id: 关键词ID
+            
+        Returns:
+            bool: 删除是否成功
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # 先删除关联关系
+                await db.execute(
+                    "DELETE FROM merchant_keywords WHERE keyword_id = ?",
+                    (keyword_id,)
+                )
+                
+                # 硬删除关键词
+                cursor = await db.execute(
+                    "DELETE FROM keywords WHERE id = ?",
+                    (keyword_id,)
+                )
+                await db.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"关键词硬删除成功: ID={keyword_id}")
+                    return True
+                else:
+                    logger.warning(f"关键词删除失败 - 未找到记录: ID={keyword_id}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"删除关键词失败: ID={keyword_id}, error: {e}", exc_info=True)
+            raise
+
+    async def hard_delete_keyword(self, keyword_id: int) -> bool:
+        """
+        硬删除关键词（物理删除，会先删除所有关联关系）
+        
+        Args:
+            keyword_id: 关键词ID
+            
+        Returns:
+            bool: 删除是否成功
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # 先删除所有商户关联
+                await db.execute(
+                    "DELETE FROM merchant_keywords WHERE keyword_id = ?",
+                    (keyword_id,)
+                )
+                
+                # 再删除关键词本身
+                cursor = await db.execute(
+                    "DELETE FROM keywords WHERE id = ?",
+                    (keyword_id,)
+                )
+                await db.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.warning(f"关键词硬删除成功: ID={keyword_id}")
+                    return True
+                else:
+                    logger.warning(f"关键词硬删除失败 - 未找到记录: ID={keyword_id}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"硬删除关键词失败: ID={keyword_id}, error: {e}", exc_info=True)
+            raise
+
+    async def get_keywords_for_buttons(self) -> List[Dict[str, Any]]:
+        """
+        获取用于生成按钮的关键词列表（多选支持）
+        
+        Returns:
+            List[Dict]: 包含id、name和callback_data的关键词列表
+        """
+        try:
+            keywords = await self.get_all_keywords(only_active=True)
+            button_data = []
+            
+            for keyword in keywords:
+                button_data.append({
+                    'id': keyword['id'],
+                    'name': keyword['name'],
+                    'text': f"{keyword['name']}",  # 按钮显示时不加#
+                    'callback_data': f"keyword_{keyword['id']}"
+                })
+            
+            logger.debug(f"获取关键词按钮数据成功，共 {len(button_data)} 个关键词")
+            return button_data
+            
+        except Exception as e:
+            logger.error(f"获取关键词按钮数据失败: {e}", exc_info=True)
+            raise
+
+    async def get_merchant_keywords(self, merchant_id: int) -> List[Dict[str, Any]]:
+        """
+        获取商户已选择的关键词
+        
+        Args:
+            merchant_id: 商户ID
+            
+        Returns:
+            List[Dict]: 商户选择的关键词列表
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    """
+                    SELECT k.id, k.name, mk.created_at
+                    FROM keywords k
+                    JOIN merchant_keywords mk ON k.id = mk.keyword_id
+                    WHERE mk.merchant_id = ? AND k.is_active = TRUE
+                    ORDER BY k.name ASC
+                    """,
+                    (merchant_id,)
+                )
+                rows = await cursor.fetchall()
+                
+                keywords = []
+                for row in rows:
+                    keywords.append({
+                        'id': row[0],
+                        'name': row[1],  # 使用实际的name字段
+                        'selected_at': row[2]
+                    })
+                
+                logger.debug(f"获取商户 {merchant_id} 的关键词成功，共 {len(keywords)} 个")
+                return keywords
+                
+        except Exception as e:
+            logger.error(f"获取商户关键词失败: merchant_id={merchant_id}, error: {e}", exc_info=True)
+            raise
+
+    async def set_merchant_keywords(self, merchant_id: int, keyword_ids: List[int]) -> bool:
+        """
+        设置商户的关键词（先清空再添加）
+        
+        Args:
+            merchant_id: 商户ID
+            keyword_ids: 关键词ID列表
+            
+        Returns:
+            bool: 设置是否成功
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # 先删除现有关联
+                await db.execute(
+                    "DELETE FROM merchant_keywords WHERE merchant_id = ?",
+                    (merchant_id,)
+                )
+                
+                # 添加新关联
+                for keyword_id in keyword_ids:
+                    # 验证关键词是否存在且激活
+                    cursor = await db.execute(
+                        "SELECT COUNT(*) FROM keywords WHERE id = ? AND is_active = TRUE",
+                        (keyword_id,)
+                    )
+                    if (await cursor.fetchone())[0] == 0:
+                        logger.warning(f"关键词 {keyword_id} 不存在或未激活，跳过")
+                        continue
+                    
+                    await db.execute(
+                        """
+                        INSERT INTO merchant_keywords (merchant_id, keyword_id, created_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (merchant_id, keyword_id)
+                    )
+                
+                await db.commit()
+                logger.info(f"设置商户 {merchant_id} 关键词成功，共 {len(keyword_ids)} 个")
+                return True
+                
+        except Exception as e:
+            logger.error(f"设置商户关键词失败: merchant_id={merchant_id}, error: {e}", exc_info=True)
+            raise
+
+    async def add_merchant_keyword(self, merchant_id: int, keyword_id: int) -> bool:
+        """
+        为商户添加单个关键词
+        
+        Args:
+            merchant_id: 商户ID
+            keyword_id: 关键词ID
+            
+        Returns:
+            bool: 添加是否成功
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # 验证关键词是否存在且激活
+                cursor = await db.execute(
+                    "SELECT COUNT(*) FROM keywords WHERE id = ? AND is_active = TRUE",
+                    (keyword_id,)
+                )
+                if (await cursor.fetchone())[0] == 0:
+                    raise ValueError(f"关键词ID {keyword_id} 不存在或未激活")
+                
+                # 检查是否已经关联
+                cursor = await db.execute(
+                    "SELECT COUNT(*) FROM merchant_keywords WHERE merchant_id = ? AND keyword_id = ?",
+                    (merchant_id, keyword_id)
+                )
+                if (await cursor.fetchone())[0] > 0:
+                    logger.info(f"商户 {merchant_id} 已关联关键词 {keyword_id}")
+                    return True
+                
+                # 添加关联
+                await db.execute(
+                    """
+                    INSERT INTO merchant_keywords (merchant_id, keyword_id, created_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    """,
+                    (merchant_id, keyword_id)
+                )
+                await db.commit()
+                
+                logger.info(f"为商户 {merchant_id} 添加关键词 {keyword_id} 成功")
+                return True
+                
+        except Exception as e:
+            logger.error(f"添加商户关键词失败: merchant_id={merchant_id}, keyword_id={keyword_id}, error: {e}", exc_info=True)
+            raise
+
+    async def remove_merchant_keyword(self, merchant_id: int, keyword_id: int) -> bool:
+        """
+        移除商户的单个关键词
+        
+        Args:
+            merchant_id: 商户ID
+            keyword_id: 关键词ID
+            
+        Returns:
+            bool: 移除是否成功
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    "DELETE FROM merchant_keywords WHERE merchant_id = ? AND keyword_id = ?",
+                    (merchant_id, keyword_id)
+                )
+                await db.commit()
+                
+                if cursor.rowcount > 0:
+                    logger.info(f"移除商户 {merchant_id} 关键词 {keyword_id} 成功")
+                    return True
+                else:
+                    logger.warning(f"未找到商户关键词关联: merchant_id={merchant_id}, keyword_id={keyword_id}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"移除商户关键词失败: merchant_id={merchant_id}, keyword_id={keyword_id}, error: {e}", exc_info=True)
+            raise
+
+    async def get_keywords_with_hashtags(self, keyword_ids: List[int]) -> List[str]:
+        """
+        获取带#前缀的关键词列表（用于最终确认显示）
+        
+        Args:
+            keyword_ids: 关键词ID列表
+            
+        Returns:
+            List[str]: 带#前缀的关键词名称列表
+        """
+        try:
+            if not keyword_ids:
+                return []
+            
+            async with aiosqlite.connect(self.db_path) as db:
+                placeholders = ','.join(['?'] * len(keyword_ids))
+                cursor = await db.execute(
+                    f"""
+                    SELECT name FROM keywords 
+                    WHERE id IN ({placeholders}) AND is_active = TRUE
+                    ORDER BY display_order ASC, name ASC
+                    """,
+                    keyword_ids
+                )
+                rows = await cursor.fetchall()
+                
+                hashtag_keywords = [f"#{row[0]}" for row in rows]
+                logger.debug(f"获取带#关键词成功，共 {len(hashtag_keywords)} 个")
+                return hashtag_keywords
+                
+        except Exception as e:
+            logger.error(f"获取带#关键词失败: keyword_ids={keyword_ids}, error: {e}", exc_info=True)
+            raise
+
+    async def reorder_keywords(self, keyword_orders: List[Dict[str, int]]) -> bool:
+        """
+        批量重新排序关键词
+        
+        Args:
+            keyword_orders: [{"id": 1, "display_order": 5}, ...] 格式的排序数据
+            
+        Returns:
+            bool: 排序是否成功
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                for order_data in keyword_orders:
+                    await db.execute(
+                        """
+                        UPDATE keywords 
+                        SET display_order = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        (order_data['display_order'], order_data['id'])
+                    )
+                
+                await db.commit()
+                logger.info(f"关键词排序更新成功，共更新 {len(keyword_orders)} 个关键词")
+                return True
+                
+        except Exception as e:
+            logger.error(f"关键词排序失败: {e}", exc_info=True)
+            raise
+
+    @staticmethod
+    async def count_keywords():
+        """获取关键词总数"""
+        try:
+            db_path = PathManager.get_db_path()
+            async with aiosqlite.connect(db_path) as db:
+                cursor = await db.execute("SELECT COUNT(*) FROM keywords WHERE is_active = 1")
+                result = await cursor.fetchone()
+                return result[0] if result else 0
+        except Exception as e:
+            logger.error(f"统计关键词数量失败: {e}")
+            return 0
+            
+    @staticmethod
+    async def get_keywords_by_ids(keyword_ids):
+        """根据ID列表获取关键词"""
+        try:
+            if not keyword_ids:
+                return []
+                
+            # 如果keyword_ids是字符串，尝试解析为列表
+            if isinstance(keyword_ids, str):
+                try:
+                    keyword_ids = json.loads(keyword_ids)
+                except:
+                    # 如果不是JSON格式，按逗号分割
+                    keyword_ids = [int(x.strip()) for x in keyword_ids.split(',') if x.strip().isdigit()]
+            
+            if not keyword_ids:
+                return []
+                
+            # 构造IN查询
+            placeholders = ','.join('?' * len(keyword_ids))
+            query = f"SELECT * FROM keywords WHERE id IN ({placeholders}) AND is_active = 1"
+            
+            db_path = PathManager.get_db_path()
+            async with aiosqlite.connect(db_path) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(query, keyword_ids)
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+                
+        except Exception as e:
+            logger.error(f"根据ID获取关键词失败: {e}")
+            return []

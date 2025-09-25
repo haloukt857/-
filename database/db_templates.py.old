@@ -1,0 +1,130 @@
+"""
+模板数据库操作模块
+提供模板的CRUD操作，支持实时模板更新
+"""
+
+import logging
+from typing import Dict, Optional, List
+from datetime import datetime
+
+from .db_connection import db_manager
+
+logger = logging.getLogger(__name__)
+
+
+class TemplateDatabase:
+    """模板数据库操作类"""
+    
+    @staticmethod
+    async def create_table():
+        """创建模板表"""
+        try:
+            query = """
+                CREATE TABLE IF NOT EXISTS templates (
+                    key TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """
+            await db_manager.execute_query(query)
+            logger.info("模板表创建成功")
+            
+        except Exception as e:
+            logger.error(f"创建模板表失败: {e}")
+            raise
+    
+    @staticmethod
+    async def get_template(key: str) -> Optional[Dict]:
+        """获取单个模板"""
+        try:
+            query = "SELECT key, content, updated_at FROM templates WHERE key = ?"
+            result = await db_manager.fetch_one(query, (key,))
+            
+            if result:
+                return dict(result)
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取模板失败 {key}: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all_templates() -> Dict[str, str]:
+        """获取所有模板，返回键值对字典"""
+        try:
+            query = "SELECT key, content FROM templates"
+            results = await db_manager.fetch_all(query)
+            
+            templates = {}
+            if results:
+                for row in results:
+                    templates[row['key']] = row['content']
+            
+            logger.debug(f"获取到 {len(templates)} 个模板")
+            return templates
+            
+        except Exception as e:
+            logger.error(f"获取所有模板失败: {e}")
+            return {}
+    
+    @staticmethod
+    async def save_template(key: str, content: str) -> bool:
+        """保存或更新模板"""
+        try:
+            query = """
+                INSERT OR REPLACE INTO templates (key, content, updated_at)
+                VALUES (?, ?, ?)
+            """
+            params = (key, content, datetime.now().isoformat())
+            
+            await db_manager.execute_query(query, params)
+            logger.info(f"模板已保存: {key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"保存模板失败 {key}: {e}")
+            return False
+    
+    @staticmethod
+    async def delete_template(key: str) -> bool:
+        """删除模板"""
+        try:
+            query = "DELETE FROM templates WHERE key = ?"
+            await db_manager.execute_query(query, (key,))
+            logger.info(f"模板已删除: {key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"删除模板失败 {key}: {e}")
+            return False
+    
+    @staticmethod
+    async def template_exists(key: str) -> bool:
+        """检查模板是否存在"""
+        try:
+            query = "SELECT 1 FROM templates WHERE key = ?"
+            result = await db_manager.fetch_one(query, (key,))
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"检查模板存在失败 {key}: {e}")
+            return False
+    
+    @staticmethod
+    async def migrate_from_config(config_templates: Dict[str, str]) -> int:
+        """从config.py迁移模板到数据库"""
+        try:
+            migrated_count = 0
+            
+            for key, content in config_templates.items():
+                # 检查是否已存在
+                if not await TemplateDatabase.template_exists(key):
+                    if await TemplateDatabase.save_template(key, content):
+                        migrated_count += 1
+            
+            logger.info(f"从config迁移了 {migrated_count} 个模板到数据库")
+            return migrated_count
+            
+        except Exception as e:
+            logger.error(f"从config迁移模板失败: {e}")
+            return 0

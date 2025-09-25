@@ -1,0 +1,18 @@
+# 本地开发环境依赖 (Python 3.9兼容)
+
+# Telegram机器人核心依赖
+aiogram>=3.4.1
+aiohttp>=3.9.1
+
+# 数据库相关
+aiosqlite>=0.19.0
+
+# 数据处理和验证
+pydantic>=2.5.0
+
+# 实用工具
+python-dotenv
+cryptography
+
+# 日期时间处理
+python-dateutil

@@ -1,0 +1,567 @@
+"""
+订单数据库操作模块
+提供订单创建、检索、状态更新和统计报告功能
+支持商户特定查询和时间过滤查询
+"""
+
+import logging
+from typing import Dict, List, Optional, Any, Union
+from datetime import datetime, timedelta
+from decimal import Decimal
+import json
+
+from .db_connection import db_manager
+
+# 配置日志
+logger = logging.getLogger(__name__)
+
+class OrdersDatabase:
+    """
+    订单数据库操作类
+    处理所有与订单相关的数据库操作
+    """
+    
+    @staticmethod
+    async def create_order(order_data: Dict[str, Any]) -> int:
+        """
+        创建新订单，匹配schema.sql中的正确表结构
+        
+        Args:
+            order_data: 订单数据字典，包含以下字段：
+                - user_id: 用户Telegram ID
+                - username: 用户名（可选）
+                - user_handle: @用户名（可选）
+                - merchant_id: 商户ID
+                - order_type: 订单类型（'appointment' 或 'follow'）
+                - price: 价格（可选）
+                - appointment_time: 预约时间（可选）
+                - notes: 备注信息（可选）
+                
+        Returns:
+            新创建订单的ID
+            
+        Raises:
+            ValueError: 当必需字段缺失或数据无效时
+            Exception: 数据库操作失败时
+        """
+        try:
+            # 验证必需字段
+            required_fields = ['user_id', 'merchant_id', 'order_type']
+            for field in required_fields:
+                if field not in order_data or order_data[field] is None:
+                    raise ValueError(f"缺少必需字段: {field}")
+            
+            # 验证订单类型
+            valid_order_types = ['appointment', 'follow']
+            if order_data['order_type'] not in valid_order_types:
+                raise ValueError(f"无效的订单类型: {order_data['order_type']}")
+            
+            # 使用原始完整字段，保持所有功能
+            insert_query = """
+                INSERT INTO orders (
+                    user_id, username, user_handle, merchant_id, order_type, 
+                    price, appointment_time, notes, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            # 处理所有字段，确保数据类型正确
+            params = (
+                order_data['user_id'],
+                order_data.get('username'),
+                order_data.get('user_handle'),
+                order_data['merchant_id'],
+                order_data['order_type'],
+                order_data.get('price'),  # DECIMAL类型，可为空
+                order_data.get('appointment_time'),  # TIMESTAMP类型，可为空
+                order_data.get('notes'),
+                'pending'  # 默认状态
+            )
+            
+            # 执行插入操作
+            order_id = await db_manager.get_last_insert_id(insert_query, params)
+            
+            logger.info(f"成功创建订单，ID: {order_id}, 用户: {order_data['user_id']}, 商户: {order_data['merchant_id']}, 类型: {order_data['order_type']}")
+            return order_id
+            
+        except ValueError as e:
+            logger.error(f"订单数据验证失败: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"创建订单失败: {e}")
+            raise
+    
+    @staticmethod
+    async def get_order(order_id: int) -> Optional[Dict[str, Any]]:
+        """
+        根据ID获取订单信息
+        
+        Args:
+            order_id: 订单ID
+            
+        Returns:
+            订单信息字典或None（如果订单不存在）
+        """
+        try:
+            query = """
+                SELECT o.*, m.name as merchant_name, m.contact_info as merchant_contact
+                FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                WHERE o.id = ?
+            """
+            
+            result = await db_manager.fetch_one(query, (order_id,))
+            
+            if result:
+                order_dict = dict(result)
+                logger.debug(f"获取订单成功，ID: {order_id}")
+                return order_dict
+            else:
+                logger.warning(f"订单不存在，ID: {order_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"获取订单失败，ID: {order_id}, 错误: {e}")
+            raise
+    
+    @staticmethod
+    async def update_order_status(order_id: int, status: str, completion_time: Optional[datetime] = None) -> bool:
+        """
+        更新订单状态
+        
+        Args:
+            order_id: 订单ID
+            status: 新状态（'pending', 'confirmed', 'completed', 'cancelled'）
+            completion_time: 完成时间（可选，状态为completed时自动设置）
+            
+        Returns:
+            更新是否成功
+        """
+        try:
+            # 验证状态值
+            valid_statuses = ['pending', 'confirmed', 'completed', 'cancelled']
+            if status not in valid_statuses:
+                raise ValueError(f"无效的订单状态: {status}")
+            
+            # 如果状态是completed且没有提供完成时间，则使用当前时间
+            if status == 'completed' and completion_time is None:
+                completion_time = datetime.now()
+            
+            query = "UPDATE orders SET status = ?, completion_time = ? WHERE id = ?"
+            params = (status, completion_time, order_id)
+            
+            result = await db_manager.execute_query(query, params)
+            
+            if result > 0:
+                logger.info(f"订单状态更新成功，ID: {order_id}, 新状态: {status}")
+                return True
+            else:
+                logger.warning(f"订单不存在或状态未改变，ID: {order_id}")
+                return False
+                
+        except ValueError as e:
+            logger.error(f"订单状态验证失败: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"更新订单状态失败，ID: {order_id}, 错误: {e}")
+            raise
+    
+    @staticmethod
+    async def get_orders_by_merchant(
+        merchant_id: int, 
+        status: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取指定商户的订单列表
+        
+        Args:
+            merchant_id: 商户ID
+            status: 订单状态过滤（可选）
+            limit: 返回数量限制（可选）
+            offset: 偏移量，用于分页
+            
+        Returns:
+            订单列表
+        """
+        try:
+            # 构建查询语句
+            query = """
+                SELECT o.*, m.name as merchant_name
+                FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                WHERE o.merchant_id = ?
+            """
+            params = [merchant_id]
+            
+            # 添加状态过滤
+            if status:
+                query += " AND o.status = ?"
+                params.append(status)
+            
+            # 添加排序
+            query += " ORDER BY o.created_at DESC"
+            
+            # 添加分页
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+                if offset > 0:
+                    query += " OFFSET ?"
+                    params.append(offset)
+            
+            results = await db_manager.fetch_all(query, tuple(params))
+            
+            orders = [dict(row) for row in results]
+            logger.debug(f"获取商户订单成功，商户ID: {merchant_id}, 数量: {len(orders)}")
+            return orders
+            
+        except Exception as e:
+            logger.error(f"获取商户订单失败，商户ID: {merchant_id}, 错误: {e}")
+            raise
+    
+    @staticmethod
+    async def get_orders_by_user(
+        user_id: int,
+        status: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        获取指定用户的订单列表
+        
+        Args:
+            user_id: 用户ID
+            status: 订单状态过滤（可选）
+            limit: 返回数量限制（可选）
+            
+        Returns:
+            订单列表
+        """
+        try:
+            query = """
+                SELECT o.*, m.name as merchant_name, m.contact_info as merchant_contact
+                FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                WHERE o.user_id = ?
+            """
+            params = [user_id]
+            
+            if status:
+                query += " AND o.status = ?"
+                params.append(status)
+            
+            query += " ORDER BY o.created_at DESC"
+            
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+            
+            results = await db_manager.fetch_all(query, tuple(params))
+            
+            orders = [dict(row) for row in results]
+            logger.debug(f"获取用户订单成功，用户ID: {user_id}, 数量: {len(orders)}")
+            return orders
+            
+        except Exception as e:
+            logger.error(f"获取用户订单失败，用户ID: {user_id}, 错误: {e}")
+            raise
+    
+    @staticmethod
+    async def get_orders_by_timeframe(
+        start_date: datetime,
+        end_date: datetime,
+        merchant_id: Optional[int] = None,
+        order_type: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        根据时间范围获取订单列表
+        
+        Args:
+            start_date: 开始时间
+            end_date: 结束时间
+            merchant_id: 商户ID过滤（可选）
+            order_type: 订单类型过滤（可选）
+            status: 订单状态过滤（可选）
+            
+        Returns:
+            订单列表
+        """
+        try:
+            query = """
+                SELECT o.*, m.name as merchant_name, m.contact_info as merchant_contact
+                FROM orders o
+                LEFT JOIN merchants m ON o.merchant_id = m.id
+                WHERE o.created_at BETWEEN ? AND ?
+            """
+            params = [start_date, end_date]
+            
+            # 添加可选过滤条件
+            if merchant_id:
+                query += " AND o.merchant_id = ?"
+                params.append(merchant_id)
+            
+            if order_type:
+                query += " AND o.order_type = ?"
+                params.append(order_type)
+            
+            if status:
+                query += " AND o.status = ?"
+                params.append(status)
+            
+            query += " ORDER BY o.created_at DESC"
+            
+            results = await db_manager.fetch_all(query, tuple(params))
+            
+            orders = [dict(row) for row in results]
+            logger.debug(f"按时间范围获取订单成功，数量: {len(orders)}")
+            return orders
+            
+        except Exception as e:
+            logger.error(f"按时间范围获取订单失败: {e}")
+            raise
+    
+    @staticmethod
+    async def get_order_statistics(
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        merchant_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        获取订单统计信息
+        
+        Args:
+            start_date: 开始时间（可选，默认为30天前）
+            end_date: 结束时间（可选，默认为当前时间）
+            merchant_id: 商户ID过滤（可选）
+            
+        Returns:
+            统计信息字典，包含：
+            - total_orders: 总订单数
+            - orders_by_status: 按状态分组的订单数
+            - orders_by_type: 按类型分组的订单数
+            - total_revenue: 总收入（如果有价格信息）
+            - average_order_value: 平均订单价值
+            - orders_by_day: 按日期分组的订单数
+        """
+        try:
+            # 设置默认时间范围
+            if not end_date:
+                end_date = datetime.now()
+            if not start_date:
+                start_date = end_date - timedelta(days=30)
+            
+            # 基础查询条件
+            base_where = "WHERE created_at BETWEEN ? AND ?"
+            base_params = [start_date, end_date]
+            
+            if merchant_id:
+                base_where += " AND merchant_id = ?"
+                base_params.append(merchant_id)
+            
+            # 获取总订单数
+            total_query = f"SELECT COUNT(*) as total FROM orders {base_where}"
+            total_result = await db_manager.fetch_one(total_query, tuple(base_params))
+            total_orders = total_result['total'] if total_result else 0
+            
+            # 按状态分组统计
+            status_query = f"""
+                SELECT status, COUNT(*) as count 
+                FROM orders {base_where}
+                GROUP BY status
+            """
+            status_results = await db_manager.fetch_all(status_query, tuple(base_params))
+            orders_by_status = {row['status']: row['count'] for row in status_results}
+            
+            # 按类型分组统计
+            type_query = f"""
+                SELECT order_type, COUNT(*) as count 
+                FROM orders {base_where}
+                GROUP BY order_type
+            """
+            type_results = await db_manager.fetch_all(type_query, tuple(base_params))
+            orders_by_type = {row['order_type']: row['count'] for row in type_results}
+            
+            # 收入统计
+            revenue_query = f"""
+                SELECT 
+                    SUM(CASE WHEN price IS NOT NULL THEN price ELSE 0 END) as total_revenue,
+                    AVG(CASE WHEN price IS NOT NULL THEN price ELSE NULL END) as avg_order_value,
+                    COUNT(CASE WHEN price IS NOT NULL THEN 1 END) as paid_orders
+                FROM orders {base_where}
+            """
+            revenue_result = await db_manager.fetch_one(revenue_query, tuple(base_params))
+            
+            total_revenue = float(revenue_result['total_revenue']) if revenue_result['total_revenue'] else 0.0
+            avg_order_value = float(revenue_result['avg_order_value']) if revenue_result['avg_order_value'] else 0.0
+            paid_orders = revenue_result['paid_orders'] if revenue_result else 0
+            
+            # 按日期分组统计
+            daily_query = f"""
+                SELECT 
+                    DATE(created_at) as order_date,
+                    COUNT(*) as count
+                FROM orders {base_where}
+                GROUP BY DATE(created_at)
+                ORDER BY order_date DESC
+            """
+            daily_results = await db_manager.fetch_all(daily_query, tuple(base_params))
+            orders_by_day = {row['order_date']: row['count'] for row in daily_results}
+            
+            statistics = {
+                'total_orders': total_orders,
+                'orders_by_status': orders_by_status,
+                'orders_by_type': orders_by_type,
+                'total_revenue': total_revenue,
+                'average_order_value': avg_order_value,
+                'paid_orders': paid_orders,
+                'orders_by_day': orders_by_day,
+                'date_range': {
+                    'start_date': start_date.isoformat(),
+                    'end_date': end_date.isoformat()
+                }
+            }
+            
+            logger.info(f"订单统计生成成功，总订单数: {total_orders}")
+            return statistics
+            
+        except Exception as e:
+            logger.error(f"获取订单统计失败: {e}")
+            raise
+    
+    @staticmethod
+    async def get_merchant_order_summary(merchant_id: int) -> Dict[str, Any]:
+        """
+        获取商户订单摘要信息
+        
+        Args:
+            merchant_id: 商户ID
+            
+        Returns:
+            商户订单摘要字典
+        """
+        try:
+            # 获取商户基本信息
+            merchant_query = "SELECT name, status FROM merchants WHERE id = ?"
+            merchant_result = await db_manager.fetch_one(merchant_query, (merchant_id,))
+            
+            if not merchant_result:
+                raise ValueError(f"商户不存在，ID: {merchant_id}")
+            
+            # 获取订单统计
+            stats_query = """
+                SELECT 
+                    COUNT(*) as total_orders,
+                    COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders,
+                    COUNT(CASE WHEN status = 'confirmed' THEN 1 END) as confirmed_orders,
+                    COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_orders,
+                    COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_orders,
+                    COUNT(CASE WHEN order_type = 'appointment' THEN 1 END) as appointments,
+                    COUNT(CASE WHEN order_type = 'follow' THEN 1 END) as follows,
+                    SUM(CASE WHEN price IS NOT NULL THEN price ELSE 0 END) as total_revenue,
+                    MAX(created_at) as last_order_date
+                FROM orders 
+                WHERE merchant_id = ?
+            """
+            
+            stats_result = await db_manager.fetch_one(stats_query, (merchant_id,))
+            
+            summary = {
+                'merchant_id': merchant_id,
+                'merchant_name': merchant_result['name'],
+                'merchant_status': merchant_result['status'],
+                'total_orders': stats_result['total_orders'] or 0,
+                'pending_orders': stats_result['pending_orders'] or 0,
+                'confirmed_orders': stats_result['confirmed_orders'] or 0,
+                'completed_orders': stats_result['completed_orders'] or 0,
+                'cancelled_orders': stats_result['cancelled_orders'] or 0,
+                'appointments': stats_result['appointments'] or 0,
+                'follows': stats_result['follows'] or 0,
+                'total_revenue': float(stats_result['total_revenue']) if stats_result['total_revenue'] else 0.0,
+                'last_order_date': stats_result['last_order_date']
+            }
+            
+            logger.debug(f"商户订单摘要生成成功，商户ID: {merchant_id}")
+            return summary
+            
+        except Exception as e:
+            logger.error(f"获取商户订单摘要失败，商户ID: {merchant_id}, 错误: {e}")
+            raise
+    
+    @staticmethod
+    async def delete_order(order_id: int) -> bool:
+        """
+        删除订单
+        
+        Args:
+            order_id: 订单ID
+            
+        Returns:
+            删除是否成功
+        """
+        try:
+            query = "DELETE FROM orders WHERE id = ?"
+            result = await db_manager.execute_query(query, (order_id,))
+            
+            if result > 0:
+                logger.info(f"订单删除成功，ID: {order_id}")
+                return True
+            else:
+                logger.warning(f"订单不存在，ID: {order_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"删除订单失败，ID: {order_id}, 错误: {e}")
+            raise
+    
+    @staticmethod
+    async def update_order(order_id: int, update_data: Dict[str, Any]) -> bool:
+        """
+        更新订单信息
+        
+        Args:
+            order_id: 订单ID
+            update_data: 要更新的字段字典
+            
+        Returns:
+            更新是否成功
+        """
+        try:
+            if not update_data:
+                raise ValueError("更新数据不能为空")
+            
+            # 构建更新查询
+            allowed_fields = [
+                'username', 'user_handle', 'order_type', 'price', 
+                'appointment_time', 'completion_time', 'status', 'notes'
+            ]
+            
+            update_fields = []
+            params = []
+            
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    update_fields.append(f"{field} = ?")
+                    params.append(value)
+            
+            if not update_fields:
+                raise ValueError("没有有效的更新字段")
+            
+            query = f"UPDATE orders SET {', '.join(update_fields)} WHERE id = ?"
+            params.append(order_id)
+            
+            result = await db_manager.execute_query(query, tuple(params))
+            
+            if result > 0:
+                logger.info(f"订单更新成功，ID: {order_id}")
+                return True
+            else:
+                logger.warning(f"订单不存在或数据未改变，ID: {order_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"更新订单失败，ID: {order_id}, 错误: {e}")
+            raise
+
+# 创建全局实例
+orders_db = OrdersDatabase()

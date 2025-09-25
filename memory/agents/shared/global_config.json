@@ -1,0 +1,15 @@
+{
+  "thinking_language": "en",
+  "information_retrieval_language": "en",
+  "reasoning_language": "en",
+  "analysis_language": "en",
+  "response_language": "zh",
+  "reply_policy": {
+    "single_solution_only": true,
+    "completeness": "full",
+    "clarity": "clear",
+    "avoid_fallbacks": true
+  },
+  "notes": "Agent must always think/reason in English, but always reply to the user in Chinese. Provide one complete, clear solution; do not propose multiple simplified or fallback options."
+}
+

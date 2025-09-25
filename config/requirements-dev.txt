@@ -1,0 +1,25 @@
+# 本地开发环境依赖
+# 使用更宽松的版本要求
+
+# Telegram机器人核心依赖
+aiogram>=3.4.1
+aiohttp>=3.9.1
+
+# 数据库相关
+aiosqlite>=0.19.0
+
+# 网页管理面板
+python-fasthtml
+uvicorn
+starlette
+
+# 数据处理和验证
+pydantic>=2.5.0
+python-multipart
+
+# 实用工具
+python-dotenv
+cryptography
+
+# 日期时间处理
+python-dateutil

@@ -1,0 +1,691 @@
+"""
+商户数据库操作模块
+提供商户管理的CRUD操作，包括创建、查询、更新和删除商户信息
+"""
+
+import json
+import logging
+import aiosqlite
+from typing import Dict, List, Optional, Any, Union
+from datetime import datetime
+
+# 导入数据库连接管理器
+from .db_connection import db_manager
+from path_manager import PathManager
+
+# 配置日志
+logger = logging.getLogger(__name__)
+
+class MerchantManager:
+    """商户管理器类，提供所有商户相关的数据库操作"""
+    
+    @staticmethod
+    async def create_merchant(merchant_data: Dict[str, Any]) -> Optional[int]:
+        """
+        创建新商户
+        
+        Args:
+            merchant_data: 商户信息字典，包含以下字段：
+                - chat_id: Telegram聊天ID (必需)
+                - name: 商户名称 (必需)
+                - region: 地区 (可选)
+                - category: 类别 (可选)
+                - contact_info: 联系信息 (可选)
+                - profile_data: 详细资料字典 (可选)
+                - status: 状态 (可选，默认为'pending')
+        
+        Returns:
+            新创建商户的ID，失败时返回None
+        """
+        try:
+            # 验证必需字段
+            if not merchant_data.get('chat_id') or not merchant_data.get('name'):
+                logger.error("创建商户失败：缺少必需字段 chat_id 或 name")
+                return None
+            
+            # 检查商户是否已存在
+            existing = await MerchantManager.get_merchant_by_chat_id(merchant_data['chat_id'])
+            if existing:
+                logger.warning(f"商户已存在，chat_id: {merchant_data['chat_id']}")
+                return existing['id']
+            
+            # 准备插入数据
+            profile_json = json.dumps(merchant_data.get('profile_data', {}), ensure_ascii=False)
+            
+            # 支持新7步流程的完整字段插入
+            query = """
+                INSERT INTO merchants (
+                    chat_id, name, region, category, contact_info, profile_data, status,
+                    merchant_type, province_id, region_id, p_price, pp_price, 
+                    custom_description, user_info, channel_link
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            params = (
+                merchant_data['chat_id'],
+                merchant_data['name'],
+                merchant_data.get('region'),
+                merchant_data.get('category'),
+                merchant_data.get('contact_info'),
+                profile_json,
+                merchant_data.get('status', 'pending'),
+                # 新7步流程字段
+                merchant_data.get('merchant_type'),
+                merchant_data.get('province_id'),
+                merchant_data.get('region_id'),
+                merchant_data.get('p_price'),
+                merchant_data.get('pp_price'),
+                merchant_data.get('custom_description'),
+                merchant_data.get('user_info'),
+                merchant_data.get('channel_link')
+            )
+            
+            merchant_id = await db_manager.get_last_insert_id(query, params)
+            
+            logger.info(f"商户创建成功，ID: {merchant_id}, 名称: {merchant_data['name']}")
+            
+            # 记录活动日志
+            await MerchantManager._log_merchant_activity(
+                merchant_id, 'merchant_created', 
+                {'name': merchant_data['name'], 'chat_id': merchant_data['chat_id']}
+            )
+            
+            return merchant_id
+            
+        except Exception as e:
+            logger.error(f"创建商户失败: {e}")
+            return None
+    
+    @staticmethod
+    async def create_blank_merchant(user_id: int, binding_code: str = None) -> Optional[int]:
+        """
+        创建空白商户档案（快速注册模式）
+        
+        Args:
+            user_id: Telegram用户ID
+            binding_code: 绑定码（可选）
+            
+        Returns:
+            int: 新创建的商户ID，失败时返回None
+        """
+        try:
+            merchant_data = {
+                'chat_id': user_id,
+                'name': '待完善',
+                'region': '待设置',
+                'category': '待设置',
+                'merchant_type': '待设置', 
+                'province_id': None,
+                'region_id': None,
+                'p_price': '0',
+                'pp_price': '0', 
+                'custom_description': '待完善',
+                'contact_info': '待完善',
+                'profile_data': {
+                    'binding_code': binding_code,
+                    'registration_mode': 'quick',
+                    'created_by': 'system'
+                },
+                'status': 'pending',  # 待管理员完善
+                'user_info': '{}',
+                'channel_link': ''
+            }
+            
+            merchant_id = await MerchantManager.create_merchant(merchant_data)
+            
+            if merchant_id:
+                logger.info(f"空白商户档案创建成功，用户ID: {user_id}, 商户ID: {merchant_id}")
+                
+                # 记录快速注册活动日志
+                await MerchantManager._log_merchant_activity(
+                    merchant_id, 'quick_registration', 
+                    {'user_id': user_id, 'binding_code': binding_code}
+                )
+            
+            return merchant_id
+            
+        except Exception as e:
+            logger.error(f"创建空白商户失败: {e}")
+            return None
+    
+    @staticmethod
+    async def get_merchant(merchant_id: int) -> Optional[Dict[str, Any]]:
+        """
+        根据ID获取商户信息
+        
+        Args:
+            merchant_id: 商户ID
+            
+        Returns:
+            商户信息字典，不存在时返回None
+        """
+        try:
+            query = """
+                SELECT m.id, m.chat_id, m.name, m.region, m.category, m.contact_info, 
+                       m.profile_data, m.status, m.created_at, m.updated_at,
+                       m.merchant_type, m.province_id, m.region_id, m.p_price, m.pp_price,
+                       m.custom_description, m.user_info, m.channel_link, m.show_in_region_search,
+                       p.name as province_name, r.name as region_name
+                FROM merchants m
+                LEFT JOIN provinces p ON m.province_id = p.id
+                LEFT JOIN regions r ON m.region_id = r.id
+                WHERE m.id = ?
+            """
+            
+            result = await db_manager.fetch_one(query, (merchant_id,))
+            
+            if result:
+                merchant = dict(result)
+                # 动态生成地区信息
+                if merchant.get('province_name') or merchant.get('region_name'):
+                    province_part = merchant.get('province_name', '')
+                    region_part = merchant.get('region_name', '')
+                    if province_part and region_part:
+                        merchant['region'] = f"{province_part}-{region_part}"
+                    elif province_part:
+                        merchant['region'] = province_part
+                    elif region_part:
+                        merchant['region'] = region_part
+                
+                # 解析JSON字段
+                if merchant['profile_data']:
+                    try:
+                        merchant['profile_data'] = json.loads(merchant['profile_data'])
+                    except json.JSONDecodeError:
+                        merchant['profile_data'] = {}
+                
+                logger.debug(f"获取商户成功，ID: {merchant_id}")
+                return merchant
+            else:
+                logger.debug(f"商户不存在，ID: {merchant_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"获取商户失败: {e}")
+            return None
+    
+    @staticmethod
+    async def get_merchant_by_chat_id(chat_id: int) -> Optional[Dict[str, Any]]:
+        """
+        根据Telegram聊天ID获取商户信息
+        
+        Args:
+            chat_id: Telegram聊天ID
+            
+        Returns:
+            商户信息字典，不存在时返回None
+        """
+        try:
+            query = """
+                SELECT id, chat_id, name, region, category, contact_info, 
+                       profile_data, status, created_at, updated_at,
+                       merchant_type, province_id, region_id, p_price, pp_price,
+                       custom_description, user_info, channel_link
+                FROM merchants WHERE chat_id = ?
+            """
+            
+            result = await db_manager.fetch_one(query, (chat_id,))
+            
+            if result:
+                merchant = dict(result)
+                # 解析JSON字段
+                if merchant['profile_data']:
+                    try:
+                        merchant['profile_data'] = json.loads(merchant['profile_data'])
+                    except json.JSONDecodeError:
+                        merchant['profile_data'] = {}
+                
+                logger.debug(f"根据chat_id获取商户成功: {chat_id}")
+                return merchant
+            else:
+                logger.debug(f"商户不存在，chat_id: {chat_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"根据chat_id获取商户失败: {e}")
+            return None
+    
+    @staticmethod
+    async def get_all_merchants(
+        status_filter: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取所有商户列表
+        
+        Args:
+            status_filter: 状态过滤器 ('active', 'inactive', 'pending')
+            limit: 限制返回数量
+            offset: 偏移量
+            
+        Returns:
+            商户信息列表
+        """
+        try:
+            query = """
+                SELECT id, chat_id, name, region, category, contact_info, 
+                       profile_data, status, created_at, updated_at,
+                       merchant_type, province_id, region_id, p_price, pp_price,
+                       custom_description, user_info, channel_link, show_in_region_search
+                FROM merchants
+            """
+            params = []
+            
+            # 添加状态过滤
+            if status_filter:
+                query += " WHERE status = ?"
+                params.append(status_filter)
+            
+            # 添加排序
+            query += " ORDER BY created_at DESC"
+            
+            # 添加分页
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+                if offset > 0:
+                    query += " OFFSET ?"
+                    params.append(offset)
+            
+            results = await db_manager.fetch_all(query, tuple(params) if params else None)
+            
+            merchants = []
+            for result in results:
+                merchant = dict(result)
+                # 解析JSON字段
+                if merchant['profile_data']:
+                    try:
+                        merchant['profile_data'] = json.loads(merchant['profile_data'])
+                    except json.JSONDecodeError:
+                        merchant['profile_data'] = {}
+                merchants.append(merchant)
+            
+            logger.debug(f"获取商户列表成功，数量: {len(merchants)}")
+            return merchants
+            
+        except Exception as e:
+            logger.error(f"获取商户列表失败: {e}")
+            return []
+    
+    @staticmethod
+    async def update_merchant(merchant_id: int, update_data: Dict[str, Any]) -> bool:
+        """
+        更新商户信息
+        
+        Args:
+            merchant_id: 商户ID
+            update_data: 要更新的字段字典
+            
+        Returns:
+            更新是否成功
+        """
+        try:
+            # 验证商户是否存在
+            existing = await MerchantManager.get_merchant(merchant_id)
+            if not existing:
+                logger.error(f"商户不存在，无法更新，ID: {merchant_id}")
+                return False
+            
+            # 构建更新查询
+            update_fields = []
+            params = []
+            
+            allowed_fields = [
+                'name', 'region', 'category', 'contact_info', 'profile_data', 'status',
+                'merchant_type', 'province_id', 'region_id', 'p_price', 'pp_price', 'custom_description', 'channel_link'
+            ]
+            
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    update_fields.append(f"{field} = ?")
+                    if field == 'profile_data' and isinstance(value, dict):
+                        params.append(json.dumps(value, ensure_ascii=False))
+                    else:
+                        params.append(value)
+            
+            if not update_fields:
+                logger.warning("没有有效的更新字段")
+                return False
+            
+            # 添加updated_at字段
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(merchant_id)
+            
+            query = f"UPDATE merchants SET {', '.join(update_fields)} WHERE id = ?"
+            
+            result = await db_manager.execute_query(query, tuple(params))
+            
+            if result > 0:
+                logger.info(f"商户更新成功，ID: {merchant_id}")
+                
+                # 记录活动日志
+                await MerchantManager._log_merchant_activity(
+                    merchant_id, 'merchant_updated', update_data
+                )
+                
+                return True
+            else:
+                logger.warning(f"商户更新失败，可能不存在，ID: {merchant_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"更新商户失败: {e}")
+            return False
+    
+    @staticmethod
+    async def update_merchant_status(merchant_id: int, status: str) -> bool:
+        """
+        更新商户状态
+        
+        Args:
+            merchant_id: 商户ID
+            status: 新状态 ('active', 'inactive', 'pending')
+            
+        Returns:
+            更新是否成功
+        """
+        try:
+            # 验证状态值
+            valid_statuses = ['active', 'inactive', 'pending']
+            if status not in valid_statuses:
+                logger.error(f"无效的状态值: {status}")
+                return False
+            
+            query = "UPDATE merchants SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+            result = await db_manager.execute_query(query, (status, merchant_id))
+            
+            if result > 0:
+                logger.info(f"商户状态更新成功，ID: {merchant_id}, 新状态: {status}")
+                
+                # 记录活动日志
+                await MerchantManager._log_merchant_activity(
+                    merchant_id, 'status_changed', {'new_status': status}
+                )
+                
+                return True
+            else:
+                logger.warning(f"商户状态更新失败，可能不存在，ID: {merchant_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"更新商户状态失败: {e}")
+            return False
+    
+    @staticmethod
+    async def delete_merchant(merchant_id: int) -> bool:
+        """
+        删除商户
+        
+        Args:
+            merchant_id: 商户ID
+            
+        Returns:
+            删除是否成功
+        """
+        try:
+            # 获取商户信息用于日志记录
+            merchant = await MerchantManager.get_merchant(merchant_id)
+            if not merchant:
+                logger.warning(f"商户不存在，无法删除，ID: {merchant_id}")
+                return False
+            
+            # 删除商户（级联删除相关订单）
+            query = "DELETE FROM merchants WHERE id = ?"
+            result = await db_manager.execute_query(query, (merchant_id,))
+            
+            if result > 0:
+                logger.info(f"商户删除成功，ID: {merchant_id}, 名称: {merchant['name']}")
+                
+                # 记录活动日志
+                await MerchantManager._log_merchant_activity(
+                    merchant_id, 'merchant_deleted', 
+                    {'name': merchant['name'], 'chat_id': merchant['chat_id']}
+                )
+                
+                return True
+            else:
+                logger.warning(f"商户删除失败，ID: {merchant_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"删除商户失败: {e}")
+            return False
+    
+    @staticmethod
+    async def search_merchants(
+        search_term: str,
+        search_fields: List[str] = None,
+        status_filter: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        搜索商户
+        
+        Args:
+            search_term: 搜索关键词
+            search_fields: 搜索字段列表，默认为['name', 'region', 'category']
+            status_filter: 状态过滤器
+            
+        Returns:
+            匹配的商户列表
+        """
+        try:
+            if not search_fields:
+                search_fields = ['name', 'region', 'category']
+            
+            # 构建搜索条件
+            search_conditions = []
+            params = []
+            
+            for field in search_fields:
+                search_conditions.append(f"{field} LIKE ?")
+                params.append(f"%{search_term}%")
+            
+            query = f"""
+                SELECT id, chat_id, name, region, category, contact_info, 
+                       profile_data, status, created_at, updated_at,
+                       merchant_type, province_id, region_id, p_price, pp_price,
+                       custom_description, user_info, channel_link, show_in_region_search
+                FROM merchants
+                WHERE ({' OR '.join(search_conditions)})
+            """
+            
+            # 添加状态过滤
+            if status_filter:
+                query += " AND status = ?"
+                params.append(status_filter)
+            
+            query += " ORDER BY name"
+            
+            results = await db_manager.fetch_all(query, tuple(params))
+            
+            merchants = []
+            for result in results:
+                merchant = dict(result)
+                # 解析JSON字段
+                if merchant['profile_data']:
+                    try:
+                        merchant['profile_data'] = json.loads(merchant['profile_data'])
+                    except json.JSONDecodeError:
+                        merchant['profile_data'] = {}
+                merchants.append(merchant)
+            
+            logger.debug(f"搜索商户成功，关键词: {search_term}, 结果数量: {len(merchants)}")
+            return merchants
+            
+        except Exception as e:
+            logger.error(f"搜索商户失败: {e}")
+            return []
+    
+    @staticmethod
+    async def get_merchant_statistics() -> Dict[str, Any]:
+        """
+        获取商户统计信息
+        
+        Returns:
+            统计信息字典
+        """
+        try:
+            stats = {}
+            
+            # 总商户数
+            result = await db_manager.fetch_one("SELECT COUNT(*) FROM merchants")
+            stats['total_merchants'] = result[0] if result else 0
+            
+            # 按状态统计
+            status_query = """
+                SELECT status, COUNT(*) as count 
+                FROM merchants 
+                GROUP BY status
+            """
+            status_results = await db_manager.fetch_all(status_query)
+            stats['by_status'] = {row['status']: row['count'] for row in status_results}
+            
+            # 按地区统计
+            region_query = """
+                SELECT region, COUNT(*) as count 
+                FROM merchants 
+                WHERE region IS NOT NULL AND region != ''
+                GROUP BY region 
+                ORDER BY count DESC 
+                LIMIT 10
+            """
+            region_results = await db_manager.fetch_all(region_query)
+            stats['by_region'] = {row['region']: row['count'] for row in region_results}
+            
+            # 按类别统计
+            category_query = """
+                SELECT category, COUNT(*) as count 
+                FROM merchants 
+                WHERE category IS NOT NULL AND category != ''
+                GROUP BY category 
+                ORDER BY count DESC 
+                LIMIT 10
+            """
+            category_results = await db_manager.fetch_all(category_query)
+            stats['by_category'] = {row['category']: row['count'] for row in category_results}
+            
+            # 最近注册统计
+            recent_query = """
+                SELECT COUNT(*) 
+                FROM merchants 
+                WHERE created_at >= datetime('now', '-7 days')
+            """
+            recent_result = await db_manager.fetch_one(recent_query)
+            stats['recent_registrations'] = recent_result[0] if recent_result else 0
+            
+            logger.debug(f"商户统计信息获取成功: {stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取商户统计信息失败: {e}")
+            return {}
+    
+    @staticmethod
+    async def _log_merchant_activity(merchant_id: int, action_type: str, details: Dict[str, Any]):
+        """
+        记录商户活动日志
+        
+        Args:
+            merchant_id: 商户ID
+            action_type: 活动类型
+            details: 活动详情
+        """
+        try:
+            query = """
+                INSERT INTO activity_logs (user_id, action_type, details, merchant_id, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            """
+            
+            await db_manager.execute_query(
+                query,
+                (
+                    0,  # 系统操作
+                    action_type,
+                    json.dumps(details, ensure_ascii=False),
+                    merchant_id,
+                    datetime.now()
+                )
+            )
+            
+        except Exception as e:
+            logger.warning(f"记录商户活动日志失败: {e}")
+
+    @staticmethod
+    async def toggle_merchant_region_search_status(merchant_id: int) -> bool:
+        """切换商家地区搜索的显示状态 (0/1)"""
+        try:
+            # 使用全局的 db_manager 实例
+            # 通过 1 - show_in_region_search 的数学技巧直接切换0和1
+            query = """
+                UPDATE merchants
+                SET
+                    show_in_region_search = 1 - show_in_region_search,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """
+            result = await db_manager.execute_query(query, (merchant_id,))
+
+            if result > 0:
+                logger.info(f"商家 {merchant_id} 的地区搜索显示状态切换成功。")
+                return True
+            else:
+                logger.warning(f"尝试切换地区搜索状态失败，商家ID {merchant_id} 可能不存在。")
+                return False
+        except Exception as e:
+            logger.error(f"切换商家 {merchant_id} 的地区搜索状态时发生异常: {e}")
+            return False
+
+# 便捷函数
+async def create_merchant(merchant_data: Dict[str, Any]) -> Optional[int]:
+    """创建商户的便捷函数"""
+    return await MerchantManager.create_merchant(merchant_data)
+
+async def get_merchant(merchant_id: int) -> Optional[Dict[str, Any]]:
+    """获取商户的便捷函数"""
+    return await MerchantManager.get_merchant(merchant_id)
+
+async def get_merchant_by_chat_id(chat_id: int) -> Optional[Dict[str, Any]]:
+    """根据chat_id获取商户的便捷函数"""
+    return await MerchantManager.get_merchant_by_chat_id(chat_id)
+
+async def get_all_merchants(status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    """获取所有商户的便捷函数"""
+    return await MerchantManager.get_all_merchants(status_filter)
+
+async def update_merchant(merchant_id: int, update_data: Dict[str, Any]) -> bool:
+    """更新商户的便捷函数"""
+    return await MerchantManager.update_merchant(merchant_id, update_data)
+
+async def update_merchant_status(merchant_id: int, status: str) -> bool:
+    """更新商户状态的便捷函数"""
+    return await MerchantManager.update_merchant_status(merchant_id, status)
+
+async def delete_merchant(merchant_id: int) -> bool:
+    """删除商户的便捷函数"""
+    return await MerchantManager.delete_merchant(merchant_id)
+
+async def search_merchants(search_term: str, status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    """搜索商户的便捷函数"""
+    return await MerchantManager.search_merchants(search_term, status_filter=status_filter)
+
+async def get_merchant_stats() -> Dict[str, Any]:
+    """获取商户统计的便捷函数"""
+    return await MerchantManager.get_merchant_statistics()
+
+async def get_merchant_type_statistics():
+    """获取商家类型统计"""
+    db_path = PathManager.get_db_path()
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("""
+            SELECT merchant_type, COUNT(*) as count
+            FROM merchants 
+            WHERE merchant_type IS NOT NULL
+            GROUP BY merchant_type
+        """)
+        results = await cursor.fetchall()
+        return {row[0]: row[1] for row in results}
+
+# 创建全局实例
+merchants_db = MerchantManager()

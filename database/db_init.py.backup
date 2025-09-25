@@ -1,0 +1,421 @@
+"""
+数据库初始化模块
+负责创建数据库表结构、执行迁移和初始化系统配置
+"""
+
+import os
+import logging
+from typing import Dict, List, Optional
+import json
+from datetime import datetime, timedelta
+
+# 导入数据库连接管理器
+from .db_connection import db_manager
+
+# 配置日志
+logger = logging.getLogger(__name__)
+
+class DatabaseInitializer:
+    """数据库初始化器类"""
+    
+    def __init__(self):
+        """初始化数据库初始化器"""
+        self.schema_version = "1.0"
+        self.migration_history = []
+    
+    async def initialize_database(self) -> bool:
+        """
+        初始化数据库
+        优先使用自动架构管理器，回退到传统SQL文件方式
+        
+        Returns:
+            初始化是否成功
+        """
+        try:
+            logger.info("开始初始化数据库...")
+            
+            # 优先尝试自动架构管理器
+            try:
+                from .db_auto_schema import auto_initialize_database
+                logger.info("🚀 使用智能自动架构管理器...")
+                
+                success = await auto_initialize_database()
+                if success:
+                    # 验证表是否创建成功
+                    if await self._verify_tables():
+                        logger.info("✅ 自动架构管理器初始化成功")
+                        await self._log_initialization()
+                        return True
+                    else:
+                        logger.warning("自动架构创建的表验证失败，尝试传统方式...")
+                else:
+                    logger.warning("自动架构管理器初始化失败，尝试传统方式...")
+            except Exception as e:
+                logger.warning(f"自动架构管理器失败: {e}，尝试传统方式...")
+            
+            # 回退到传统SQL文件方式
+            logger.info("📁 使用传统SQL文件方式初始化...")
+            return await self._initialize_with_sql_files()
+                
+        except Exception as e:
+            logger.error(f"数据库初始化失败: {e}")
+            return False
+    
+    async def _initialize_with_sql_files(self) -> bool:
+        """使用传统SQL文件方式初始化数据库"""
+        try:
+            # 读取并执行主SQL架构文件
+            schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+            
+            if not os.path.exists(schema_path):
+                logger.error(f"找不到架构文件: {schema_path}")
+                return False
+            
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                schema_sql = f.read()
+            
+            # 分割SQL语句并执行
+            sql_statements = [stmt.strip() for stmt in schema_sql.split(';') if stmt.strip()]
+            
+            for statement in sql_statements:
+                if statement:
+                    await db_manager.execute_query(statement)
+                    logger.debug(f"执行SQL语句: {statement[:50]}...")
+            
+            # 读取并执行扩展架构文件（新上榜流程）
+            extended_schema_path = os.path.join(os.path.dirname(__file__), 'schema_extended.sql')
+            
+            if os.path.exists(extended_schema_path):
+                logger.info("执行扩展架构（新上榜流程）...")
+                
+                with open(extended_schema_path, 'r', encoding='utf-8') as f:
+                    extended_sql = f.read()
+                
+                # 分割SQL语句并执行（忽略ALTER TABLE错误，因为字段可能已存在）
+                extended_statements = [stmt.strip() for stmt in extended_sql.split(';') if stmt.strip()]
+                
+                for statement in extended_statements:
+                    if statement:
+                        try:
+                            await db_manager.execute_query(statement)
+                            logger.debug(f"执行扩展SQL语句: {statement[:50]}...")
+                        except Exception as e:
+                            # ALTER TABLE语句可能因字段已存在而失败，这是正常的
+                            if "ALTER TABLE" in statement and ("duplicate column name" in str(e).lower() or "already exists" in str(e).lower()):
+                                logger.debug(f"字段已存在，跳过: {statement[:50]}...")
+                            else:
+                                logger.warning(f"扩展SQL语句执行警告: {statement[:50]}..., 错误: {e}")
+                
+                logger.info("扩展架构执行完成")
+            else:
+                logger.warning("扩展架构文件不存在，跳过新上榜流程功能初始化")
+            
+            # 读取并执行自动回复架构文件
+            auto_reply_schema_path = os.path.join(os.path.dirname(__file__), 'schema_auto_reply.sql')
+            
+            if os.path.exists(auto_reply_schema_path):
+                logger.info("执行自动回复功能架构...")
+                
+                with open(auto_reply_schema_path, 'r', encoding='utf-8') as f:
+                    auto_reply_sql = f.read()
+                
+                # 分割SQL语句并执行
+                auto_reply_statements = [stmt.strip() for stmt in auto_reply_sql.split(';') if stmt.strip()]
+                
+                for statement in auto_reply_statements:
+                    if statement:
+                        await db_manager.execute_query(statement)
+                        logger.debug(f"执行自动回复SQL语句: {statement[:50]}...")
+                
+                logger.info("自动回复功能架构执行完成")
+            else:
+                logger.warning("自动回复架构文件不存在，跳过自动回复功能初始化")
+            
+            # 验证表是否创建成功
+            if await self._verify_tables():
+                logger.info("传统SQL文件初始化成功")
+                await self._log_initialization()
+                return True
+            else:
+                logger.error("数据库表验证失败")
+                return False
+                
+        except Exception as e:
+            logger.error(f"传统SQL文件初始化失败: {e}")
+            return False
+    
+    async def _verify_tables(self) -> bool:
+        """
+        验证所有必需的表是否存在
+        
+        Returns:
+            所有表是否都存在
+        """
+        required_tables = [
+            'merchants', 'orders', 'binding_codes', 'button_configs',
+            'activity_logs', 'fsm_states', 'system_config',
+            'auto_reply_triggers', 'auto_reply_messages', 'auto_reply_daily_stats',
+            'provinces', 'cities', 'keywords', 'merchant_keywords'
+        ]
+        
+        try:
+            for table in required_tables:
+                result = await db_manager.fetch_one(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,)
+                )
+                
+                if not result:
+                    logger.error(f"表 {table} 不存在")
+                    return False
+                    
+                logger.debug(f"表 {table} 验证成功")
+            
+            logger.info("所有数据库表验证成功")
+            return True
+            
+        except Exception as e:
+            logger.error(f"表验证失败: {e}")
+            return False
+    
+    async def _log_initialization(self):
+        """记录初始化日志"""
+        try:
+            await db_manager.execute_query(
+                """INSERT INTO activity_logs (user_id, action_type, details, timestamp) 
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    0,  # 系统用户ID
+                    'system_init',
+                    json.dumps({
+                        'action': 'database_initialized',
+                        'schema_version': self.schema_version,
+                        'timestamp': datetime.now().isoformat()
+                    }, ensure_ascii=False),
+                    datetime.now()
+                )
+            )
+            logger.info("数据库初始化日志记录完成")
+        except Exception as e:
+            logger.warning(f"记录初始化日志失败: {e}")
+    
+    async def get_schema_version(self) -> Optional[str]:
+        """
+        获取当前数据库架构版本
+        
+        Returns:
+            架构版本字符串
+        """
+        try:
+            result = await db_manager.fetch_one(
+                "SELECT config_value FROM system_config WHERE config_key = ?",
+                ('schema_version',)
+            )
+            return result[0] if result else None
+        except Exception as e:
+            logger.error(f"获取架构版本失败: {e}")
+            return None
+    
+    async def update_schema_version(self, version: str) -> bool:
+        """
+        更新数据库架构版本
+        
+        Args:
+            version: 新的版本号
+            
+        Returns:
+            更新是否成功
+        """
+        try:
+            await db_manager.execute_query(
+                """INSERT OR REPLACE INTO system_config (config_key, config_value, description) 
+                   VALUES (?, ?, ?)""",
+                ('schema_version', version, '数据库架构版本')
+            )
+            logger.info(f"架构版本更新为: {version}")
+            return True
+        except Exception as e:
+            logger.error(f"更新架构版本失败: {e}")
+            return False
+    
+    async def run_migration(self, migration_name: str, migration_sql: str) -> bool:
+        """
+        执行数据库迁移
+        
+        Args:
+            migration_name: 迁移名称
+            migration_sql: 迁移SQL语句
+            
+        Returns:
+            迁移是否成功
+        """
+        try:
+            logger.info(f"开始执行迁移: {migration_name}")
+            
+            # 检查迁移是否已经执行过
+            if await self._is_migration_applied(migration_name):
+                logger.info(f"迁移 {migration_name} 已经执行过，跳过")
+                return True
+            
+            # 执行迁移SQL
+            sql_statements = [stmt.strip() for stmt in migration_sql.split(';') if stmt.strip()]
+            
+            for statement in sql_statements:
+                if statement:
+                    await db_manager.execute_query(statement)
+            
+            # 记录迁移历史
+            await self._record_migration(migration_name)
+            
+            logger.info(f"迁移 {migration_name} 执行成功")
+            return True
+            
+        except Exception as e:
+            logger.error(f"迁移 {migration_name} 执行失败: {e}")
+            return False
+    
+    async def _is_migration_applied(self, migration_name: str) -> bool:
+        """检查迁移是否已经应用"""
+        try:
+            # 首先确保迁移历史表存在
+            await db_manager.execute_query("""
+                CREATE TABLE IF NOT EXISTS migration_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    migration_name TEXT UNIQUE NOT NULL,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            result = await db_manager.fetch_one(
+                "SELECT migration_name FROM migration_history WHERE migration_name = ?",
+                (migration_name,)
+            )
+            return result is not None
+        except Exception as e:
+            logger.error(f"检查迁移状态失败: {e}")
+            return False
+    
+    async def _record_migration(self, migration_name: str):
+        """记录迁移历史"""
+        try:
+            await db_manager.execute_query(
+                "INSERT INTO migration_history (migration_name) VALUES (?)",
+                (migration_name,)
+            )
+        except Exception as e:
+            logger.error(f"记录迁移历史失败: {e}")
+    
+    async def cleanup_expired_data(self):
+        """清理过期数据"""
+        try:
+            logger.info("开始清理过期数据...")
+            
+            # 清理过期的绑定码
+            expired_time = datetime.now() - timedelta(hours=24)
+            result = await db_manager.execute_query(
+                "DELETE FROM binding_codes WHERE expires_at < ? AND is_used = FALSE",
+                (expired_time,)
+            )
+            logger.info(f"清理了 {result} 个过期绑定码")
+            
+            # 清理旧的活动日志（保留30天）
+            old_log_time = datetime.now() - timedelta(days=30)
+            result = await db_manager.execute_query(
+                "DELETE FROM activity_logs WHERE timestamp < ?",
+                (old_log_time,)
+            )
+            logger.info(f"清理了 {result} 条旧活动日志")
+            
+            # 清理旧的FSM状态（保留7天）
+            old_state_time = datetime.now() - timedelta(days=7)
+            result = await db_manager.execute_query(
+                "DELETE FROM fsm_states WHERE updated_at < ?",
+                (old_state_time,)
+            )
+            logger.info(f"清理了 {result} 个旧FSM状态")
+            
+            # 清理旧的自动回复每日统计（保留90天）
+            old_stats_time = datetime.now() - timedelta(days=90)
+            result = await db_manager.execute_query(
+                "DELETE FROM auto_reply_daily_stats WHERE stat_date < ?",
+                (old_stats_time.date(),)
+            )
+            logger.info(f"清理了 {result} 条旧自动回复统计")
+            
+            logger.info("过期数据清理完成")
+            
+        except Exception as e:
+            logger.error(f"清理过期数据失败: {e}")
+    
+    async def get_database_stats(self) -> Dict[str, int]:
+        """
+        获取数据库统计信息
+        
+        Returns:
+            包含各表记录数的字典
+        """
+        stats = {}
+        tables = [
+            'merchants', 'orders', 'binding_codes', 'button_configs', 'activity_logs', 'fsm_states',
+            'auto_reply_triggers', 'auto_reply_messages', 'auto_reply_daily_stats',
+            'provinces', 'cities', 'keywords', 'merchant_keywords'
+        ]
+        
+        try:
+            for table in tables:
+                result = await db_manager.fetch_one(f"SELECT COUNT(*) FROM {table}")
+                stats[table] = result[0] if result else 0
+            
+            logger.debug(f"数据库统计信息: {stats}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取数据库统计信息失败: {e}")
+            return {}
+    
+    async def backup_database(self, backup_path: str) -> bool:
+        """
+        备份数据库
+        
+        Args:
+            backup_path: 备份文件路径
+            
+        Returns:
+            备份是否成功
+        """
+        try:
+            import shutil
+            
+            # 确保备份目录存在
+            os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+            
+            # 复制数据库文件
+            db_path = db_manager.db_path
+            shutil.copy2(db_path, backup_path)
+            
+            logger.info(f"数据库备份成功: {backup_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"数据库备份失败: {e}")
+            return False
+
+# 创建全局数据库初始化器实例
+db_initializer = DatabaseInitializer()
+
+async def init_database() -> bool:
+    """
+    初始化数据库的便捷函数
+    
+    Returns:
+        初始化是否成功
+    """
+    return await db_initializer.initialize_database()
+
+async def cleanup_database():
+    """清理数据库的便捷函数"""
+    await db_initializer.cleanup_expired_data()
+
+async def get_db_stats() -> Dict[str, int]:
+    """获取数据库统计信息的便捷函数"""
+    return await db_initializer.get_database_stats()

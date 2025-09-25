@@ -1,0 +1,903 @@
+/* OKX风格深色主题样式 - 简化版（统一白字/中性灰阶配色） */
+
+:root {
+  /* 主要颜色 */
+  --bg-primary: #000000;          /* 主背景 - 纯黑 */
+  --bg-secondary: #0a0a0a;        /* 次要背景 - 深灰 */
+  --bg-card: #1a1a1a;            /* 卡片背景 - 灰色 */
+  --bg-card-hover: #222222;      /* 卡片悬停 */
+  
+  /* 边框颜色 */
+  --border-primary: #333333;      /* 主边框 */
+  --border-secondary: #2a2a2a;   /* 次要边框 */
+  
+  /* 文字颜色 */
+  --text-primary: #ffffff;        /* 主要文字 - 白色 */
+  --text-secondary: #e5e5e5;     /* 次要文字 - 浅灰 */
+  --text-muted: #a0a0a0;         /* 暗淡文字 - 中灰 */
+  --text-disabled: #666666;      /* 禁用文字 - 深灰 */
+  
+  /* 灰阶层次（统一深浅关系） */
+  --g-900: #000000;              /* 页面背景 */
+  --g-850: #0a0a0a;              
+  --g-800: #121212;
+  --g-750: #161616;
+  --g-700: #1a1a1a;              /* 卡片背景 */
+  --g-650: #202020;
+  --g-600: #2a2a2a;              /* 按钮背景 */
+  --g-550: #333333;              /* 徽章背景 */
+  --g-500: #3a3a3a;              /* 悬停加亮 */
+  
+  /* 状态颜色 */
+  /* 状态色不再用于UI，统一中性灰阶 */
+  --color-success: #2a2a2a;
+  --color-success-dark: #242424;
+  --color-error: #2a2a2a;
+  --color-error-dark: #242424;
+  --color-warning: #2a2a2a;
+  --color-warning-dark: #242424;
+  --color-info: #2a2a2a;
+  --color-info-dark: #242424;
+  
+  /* 重点色 */
+  --color-primary: #10b981;       /* 主要操作色 */
+  --color-primary-dark: #059669;
+}
+
+/* 强制页面背景为黑色 */
+html, body {
+  background-color: var(--g-900) !important;
+  color: #ffffff !important;
+  /* 防止滚动条导致的布局跳动 */
+  scrollbar-gutter: stable !important;
+}
+
+/* 现代浏览器的overlay滚动条 - 完全隐藏，悬停时显示 */
+html {
+  overflow-y: auto !important;
+}
+
+/* 隐藏滚动条但保持滚动功能 */
+::-webkit-scrollbar {
+  width: 0px !important;
+  background: transparent !important;
+}
+
+/* 悬停时显示滚动条 */
+body:hover::-webkit-scrollbar {
+  width: 6px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  border-radius: 3px !important;
+  border: none !important;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Firefox滚动条 - 完全隐藏 */
+html {
+  scrollbar-width: none !important;
+}
+
+/* 数据表格等局部区域的滚动条保持可见 */
+.data-table-container::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+}
+
+.data-table-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  border-radius: 2px !important;
+}
+
+/* 卡片组件样式 */
+.card {
+  background-color: var(--g-700) !important; /* 比按钮更深一点 */
+  border: 2px solid transparent !important;
+  border-radius: 18px !important;
+  transition: border-color 0.3s ease !important;
+  box-shadow: none !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important; /* 悬停出现白色一圈边 */
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+}
+
+.card * {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  transform: none !important;
+  animation: none !important;
+}
+
+/* 按钮样式 */
+.btn {
+  border-radius: 12px !important;
+  font-weight: 500 !important;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease !important;
+  border: none !important;
+  text-transform: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  position: relative !important;
+  z-index: 1001 !important;
+}
+
+/* 修复：某些下拉/模态隐藏层覆盖按钮，导致按钮中心偶发不可点 */
+.form-control, .select, .input, .textarea, .dropdown { position: relative !important; z-index: 0 !important; }
+.select::before, .select::after { pointer-events: none !important; }
+.dropdown > .dropdown-content[hidden],
+.dropdown > .dropdown-content.hidden,
+.modal:not(.modal-open) { pointer-events: none !important; display: none !important; }
+
+.btn:hover { transform: none !important; }
+
+.btn-primary {
+  background-color: var(--g-600) !important; /* 按钮灰 */
+  color: #ffffff !important;
+  border: 1px solid #444444 !important;
+}
+.btn-primary:hover { background-color: var(--g-500) !important; }
+
+.btn-secondary {
+  background-color: #1a1a1a !important;
+  color: #ffffff !important;
+  border: 1px solid #333333 !important;
+}
+
+.btn-error,
+.btn-success,
+.btn-warning,
+.btn-info {
+  background-color: var(--g-600) !important;
+  color: #ffffff !important;
+  border: 1px solid #444444 !important;
+}
+.btn-error:hover,
+.btn-success:hover,
+.btn-warning:hover,
+.btn-info:hover { background-color: var(--g-500) !important; }
+
+.btn-ghost {
+  background-color: transparent !important;
+  color: #ffffff !important;
+  border: 1px solid #333333 !important;
+}
+
+/* 输入框样式 */
+.input, .textarea, .select {
+  background-color: #1a1a1a !important;
+  border: 1px solid #333333 !important;
+  border-radius: 12px !important;
+  color: #ffffff !important;
+}
+
+.input:focus, .textarea:focus, .select:focus {
+  border-color: #10b981 !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1) !important;
+}
+
+.input::placeholder, .textarea::placeholder {
+  color: #a0a0a0 !important;
+}
+
+/* 导航栏样式 */
+.navbar {
+  background-color: var(--g-850) !important;
+  border-bottom: 1px solid #2a2a2a !important;
+}
+
+/* 管理后台按钮左移 */
+.navbar-start {
+  margin-left: -0.5rem !important;
+}
+
+/* 导航项：常态半灰，悬停加亮，激活更明显 */
+/* 导航项：常态半灰，仅颜色变化；无圆角、无背景块 */
+.navbar .menu li > a {
+  color: rgba(255,255,255,0.75) !important;
+  background: transparent !important;
+  padding: 8px 12px !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+.navbar .menu li > a:hover {
+  background: transparent !important;
+  color: #ffffff !important; /* 仅文字加亮 */
+  border: none !important;
+  border-radius: 0 !important;
+}
+#main-nav a.active,
+#main-nav a.btn-active,
+.navbar .menu li > a[aria-current="page"] {
+  background: transparent !important;
+  color: #ffffff !important; /* 激活态更亮，但不加背景/圆角 */
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+/* 容器样式 */
+.container {
+  background-color: #000000 !important;
+}
+
+/* 覆盖所有可能的白色背景 */
+.bg-white,
+.bg-gray-50,
+.bg-gray-100,
+.bg-base-100,
+.bg-base-200 {
+  background-color: var(--g-900) !important;
+}
+
+/* 覆盖所有可能的深色文字 */
+.text-gray-900,
+.text-gray-800,
+.text-black {
+  color: #ffffff !important;
+}
+
+/* 统一所有文字为白色（高优先级），保持原有字体 */
+html, body, h1, h2, h3, h4, h5, h6,
+p, span, label, a, li, th, td, div,
+input, select, textarea, button, code, pre {
+  color: #ffffff !important;
+  font-family: inherit !important; /* 保持TailwindCSS/DaisyUI默认字体栈 */
+}
+
+/* 统一布局标准类 */
+
+/* 页面头部 */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+/* 页面标题已在统一布局标准类中定义，此处移除重复定义 */
+
+.page-subtitle {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.75) !important;
+  margin-top: 0.5rem;
+}
+
+/* 统计卡片容器 */
+.stats-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.stat-card {
+  background-color: var(--g-700) !important;
+  border: 2px solid transparent !important;
+  border-radius: 18px !important;
+  padding: 1.5rem !important;
+  transition: border-color 0.3s ease !important;
+  box-shadow: none !important;
+}
+
+.stat-card:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+}
+
+/* 筛选容器 */
+.filter-container {
+  background-color: var(--g-700) !important;
+  padding: 1.5rem !important;
+  border-radius: 18px !important;
+  margin-bottom: 1.5rem !important;
+  border: 2px solid transparent !important;
+}
+
+/* 工具栏容器 */
+.toolbar-container {
+  background-color: var(--g-700) !important;
+  padding: 1rem !important;
+  border-radius: 18px !important;
+  margin-bottom: 1.5rem !important;
+  border: 2px solid transparent !important;
+}
+
+/* 数据表格容器 */
+.data-table-container {
+  overflow-x: auto;
+  background-color: var(--g-700) !important;
+  border-radius: 18px !important;
+  box-shadow: none !important;
+  border: 2px solid transparent !important;
+}
+
+.data-table-container:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+}
+
+/* 表单容器 */
+.form-container {
+  background-color: var(--g-700) !important;
+  border: 2px solid transparent !important;
+  border-radius: 18px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.form-container:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* 按钮组 */
+.action-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* 网格布局 */
+.content-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.grid-1 { grid-template-columns: 1fr; }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+.grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.grid-5 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+@media (min-width: 768px) {
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-5 { grid-template-columns: repeat(5, 1fr); }
+}
+
+/* 分页容器 */
+.pagination-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1.5rem;
+}
+
+/* 内容区块 */
+.content-section {
+  background-color: var(--g-700) !important;
+  border: 2px solid transparent !important;
+  border-radius: 18px !important;
+  padding: 1.5rem !important;
+  margin-bottom: 1.5rem !important;
+}
+
+.content-section:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.content-section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: #ffffff !important;
+}
+
+/* 链接统一白色 */
+a {
+  color: #ffffff !important;
+  text-decoration: none;
+}
+a:hover { opacity: 0.85; }
+
+/* 徽章统一中性灰背景 + 白字 */
+.badge,
+.badge-success,
+.badge-error,
+.badge-warning,
+.badge-info {
+  background-color: var(--g-550) !important;
+  color: #ffffff !important;
+  border: 1px solid #444444 !important;
+}
+
+/* 提示/警告等统一为中性灰背景 */
+.alert,
+.alert-success,
+.alert-error,
+.alert-warning,
+.alert-info {
+  background-color: var(--g-800) !important;
+  color: #ffffff !important;
+  border: 1px solid #2a2a2a !important;
+}
+
+/* 表格文本统一白色，去除花哨色块 */
+.table {
+  color: #ffffff !important;
+}
+.table :where(th, td) {
+  color: #ffffff !important;
+}
+.table-zebra :where(tbody tr:nth-child(odd)) { background-color: var(--g-850) !important; }
+.table-zebra :where(tbody tr:nth-child(even)) { background-color: var(--g-800) !important; }
+
+/* 选择器统一中性灰 */
+.select option { color: #ffffff !important; background: #1a1a1a !important; }
+
+/* 分页/菜单等统一样式 */
+.btn-group .btn { background-color: #2a2a2a !important; color: #ffffff !important; border: 1px solid #444 !important; }
+.menu, .menu :where(li > a) { color: #ffffff !important; }
+
+/* 卡片与阴影统一 */
+.card { background-color: #1a1a1a !important; border: 1px solid #2a2a2a !important; }
+.card-body * { color: #ffffff !important; }
+
+/* --- Neutralize Tailwind gradient utilities (dashboard bright blocks) --- */
+[class*="bg-gradient-to-"] {
+  background-image: none !important;
+  background-color: #1a1a1a !important;
+}
+[class*="from-"],
+[class*="to-"],
+[class*="via-"] {
+  --tw-gradient-from: transparent !important;
+  --tw-gradient-to: transparent !important;
+  --tw-gradient-stops: transparent !important;
+}
+
+/* Ensure any text color utility is forced to white */
+[class^="text-"],
+[class*=" text-"] {
+  color: #ffffff !important;
+}
+
+/* OKX 统计卡片（仪表盘）- 与 .card 一致的悬停白边效果 */
+.okx-card {
+  background-color: var(--g-700) !important;
+  border: 1px solid #2a2a2a !important;
+  border-radius: 18px !important;
+  transition: border-color 0.2s ease !important;
+}
+.okx-card:hover {
+  border-color: rgba(255,255,255,0.35) !important;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+}
+
+/* 模态框样式 */
+.modal {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 9999 !important;
+  background-color: rgba(0, 0, 0, 0.85) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.modal-box {
+  background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%) !important;
+  color: #ffffff !important;
+  border: 2px solid #333333 !important;
+  border-radius: 20px !important;
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+  max-width: 500px !important;
+  width: 90% !important;
+  max-height: 85vh !important;
+  overflow-y: auto !important;
+  margin: 0 !important;
+  position: relative !important;
+  z-index: 10000 !important;
+  padding: 32px !important;
+}
+
+.modal-backdrop {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+
+.modal h3, .modal h4, .modal h5 {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 24px !important;
+  margin-bottom: 24px !important;
+  text-align: center !important;
+  padding-bottom: 16px !important;
+  border-bottom: 2px solid rgba(16, 185, 129, 0.3) !important;
+}
+
+.modal .input, .modal .textarea, .modal .select, .modal input, .modal textarea, .modal select {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 2px solid #444444 !important;
+  color: #ffffff !important;
+  border-radius: 12px !important;
+  padding: 12px 16px !important;
+  font-size: 16px !important;
+  transition: all 0.3s ease !important;
+}
+
+.modal .input:focus, .modal .textarea:focus, .modal .select:focus, .modal input:focus, .modal textarea:focus, .modal select:focus {
+  border-color: #10b981 !important;
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
+  transform: translateY(-1px) !important;
+}
+
+.modal .input::placeholder, .modal .textarea::placeholder {
+  color: #888888 !important;
+}
+
+.modal .btn {
+  border-radius: 12px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+  border: none !important;
+  transform: none !important;
+  position: relative !important;
+  z-index: 10001 !important;
+}
+
+.modal .btn:hover {
+  transform: none !important;
+  scale: none !important;
+}
+
+.modal .btn-primary {
+  background-color: #10b981 !important;
+  color: #000000 !important;
+}
+
+.modal .btn-ghost {
+  background-color: transparent !important;
+  color: #ffffff !important;
+  border: 1px solid #444444 !important;
+}
+
+.modal .btn-ghost:hover {
+  background-color: #2a2a2a !important;
+  border-color: #666666 !important;
+}
+
+/* 表单组样式 */
+.modal .form-group, .modal .form-control {
+  background-color: transparent !important;
+}
+
+.modal label {
+  color: #e5e5e5 !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  margin-bottom: 8px !important;
+  display: block !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+}
+
+.modal p {
+  color: #cccccc !important;
+}
+
+/* 确保模态框内所有元素都在最顶层 */
+.modal * {
+  position: relative !important;
+  z-index: inherit !important;
+}
+
+.modal .modal-box * {
+  z-index: 10001 !important;
+}
+
+/* 确保模态框背景不阻止内容交互 */
+.modal-backdrop {
+  pointer-events: none !important;
+}
+
+.modal .modal-box {
+  pointer-events: all !important;
+}
+
+/* =========================== */
+/* 统一布局标准类 (Layout Standards) */
+/* =========================== */
+
+/* 页面级布局标准 */
+.page-container {
+  max-width: 1200px !important;
+  margin: 0 auto !important;
+  padding: 1.5rem !important;
+}
+
+.page-header {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: flex-start !important; /* 改为顶部对齐，确保标题位置一致 */
+  margin-bottom: 2rem !important;
+  min-height: 2.5rem !important; /* 统一最小高度40px */
+  padding: 0 !important; /* 清除内边距 */
+}
+
+.page-title {
+  font-size: 2rem !important; /* 统一32px大小 */
+  font-weight: 700 !important;
+  line-height: 2.5rem !important; /* 统一40px行高 */
+  margin: 0 !important; /* 清除所有外边距 */
+  padding: 0 !important; /* 清除所有内边距 */
+  color: #ffffff !important;
+  font-family: inherit !important; /* 继承系统默认字体 */
+  display: block !important; /* 确保块级元素 */
+  text-align: left !important; /* 强制左对齐 */
+}
+
+.page-subtitle {
+  font-size: 1rem !important;
+  color: #a0a0a0 !important;
+  margin-top: 0.5rem !important;
+  font-family: inherit !important; /* 继承系统默认字体 */
+}
+
+.page-content {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2rem !important; /* space-y-8 */
+}
+
+/* 内容区块标准 */
+.content-section {
+  margin-bottom: 2rem !important;
+}
+
+.content-section-title {
+  font-size: 1.25rem !important; /* text-xl */
+  font-weight: 600 !important;
+  margin-bottom: 1rem !important;
+  color: #ffffff !important;
+  font-family: inherit !important; /* 继承系统默认字体 */
+}
+
+.content-grid {
+  display: grid !important;
+  gap: 1.5rem !important;
+}
+
+.content-card {
+  background-color: var(--g-700) !important;
+  padding: 1.5rem !important;
+  border-radius: 18px !important;
+  border: 2px solid transparent !important;
+  transition: border-color 0.3s ease !important;
+}
+
+.content-card:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+}
+
+/* 统计卡片标准 */
+.stats-container {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 1.5rem !important;
+  margin-bottom: 2rem !important;
+}
+
+@media (min-width: 768px) {
+  .stats-container {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+}
+
+.stat-card {
+  background-color: var(--g-700) !important;
+  padding: 1rem !important;
+  border-radius: 18px !important;
+  border: 2px solid transparent !important;
+  transition: border-color 0.3s ease !important;
+  color: #ffffff !important;
+}
+
+.stat-card:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+}
+
+/* 表单标准 */
+.form-container {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 1.5rem !important;
+}
+
+.form-group {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0.5rem !important;
+}
+
+.form-actions {
+  display: flex !important;
+  gap: 1rem !important;
+  margin-top: 1.5rem !important;
+  justify-content: flex-start !important;
+}
+
+.form-actions-center {
+  justify-content: center !important;
+}
+
+.form-actions-end {
+  justify-content: flex-end !important;
+}
+
+/* 筛选和工具栏标准 */
+.filter-container {
+  background-color: var(--g-850) !important;
+  padding: 1rem !important;
+  border-radius: 12px !important;
+  margin-bottom: 1.5rem !important;
+  border: 1px solid #2a2a2a !important;
+}
+
+.toolbar-container {
+  display: flex !important;
+  align-items: center !important;
+  gap: 1rem !important;
+  margin-bottom: 1.5rem !important;
+  flex-wrap: wrap !important;
+}
+
+/* 数据表格标准 */
+.data-table-container {
+  background-color: var(--g-700) !important;
+  border-radius: 18px !important;
+  overflow: hidden !important;
+  border: 2px solid transparent !important;
+  transition: border-color 0.3s ease !important;
+}
+
+.data-table-container:hover {
+  border-color: rgba(255, 255, 255, 0.35) !important;
+  box-shadow: 0 0 0 1.5px rgba(255,255,255,0.25) !important;
+}
+
+/* 分页标准 */
+.pagination-container {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  margin-top: 1.5rem !important;
+  flex-wrap: wrap !important;
+  gap: 1rem !important;
+}
+
+/* 网格布局标准 */
+.grid-1 { grid-template-columns: 1fr !important; }
+.grid-2 { grid-template-columns: repeat(2, 1fr) !important; }
+.grid-3 { grid-template-columns: repeat(3, 1fr) !important; }
+.grid-4 { grid-template-columns: repeat(4, 1fr) !important; }
+
+@media (max-width: 768px) {
+  .grid-2, .grid-3, .grid-4 {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) {
+  .grid-4 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .grid-3 {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+/* 间距标准 */
+.gap-standard { gap: 1.5rem !important; }
+.gap-small { gap: 1rem !important; }
+.gap-large { gap: 2rem !important; }
+
+.space-y-standard > * + * { margin-top: 1.5rem !important; }
+.space-y-small > * + * { margin-top: 1rem !important; }
+.space-y-large > * + * { margin-top: 2rem !important; }
+
+/* 动作按钮组标准 */
+.action-buttons {
+  display: flex !important;
+  gap: 0.75rem !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+}
+
+/* 状态徽章标准 */
+.status-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 0.25rem 0.75rem !important;
+  border-radius: 9999px !important;
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  background-color: var(--g-550) !important;
+  color: #ffffff !important;
+  border: 1px solid #444444 !important;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .page-container {
+    padding: 1rem !important;
+  }
+  
+  .page-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1rem !important;
+  }
+  
+  .page-title {
+    font-size: 1.5rem !important; /* text-2xl on mobile */
+  }
+  
+  .toolbar-container {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  
+  .form-actions {
+    flex-direction: column !important;
+  }
+  
+  .pagination-container {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  
+  .container {
+    padding: 1rem !important;
+  }
+  
+  .card {
+    padding: 1.5rem !important;
+  }
+  
+  .text-4xl {
+    font-size: 2rem !important;
+  }
+  
+  .grid {
+    grid-template-columns: 1fr !important;
+    gap: 1rem !important;
+  }
+  
+  .modal-box {
+    width: 95% !important;
+    max-width: 95% !important;
+  }
+}

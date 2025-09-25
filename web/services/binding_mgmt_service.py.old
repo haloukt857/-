@@ -1,0 +1,448 @@
+# -*- coding: utf-8 -*-
+"""
+绑定码管理服务
+从app.py.old中提取的绑定码管理业务逻辑
+"""
+
+import logging
+from typing import Dict, Any, List, Optional
+import secrets
+from datetime import datetime
+
+# 导入数据库管理器
+from database.db_binding_codes import binding_codes_manager
+from database.db_merchants import merchant_manager
+
+# 导入缓存服务
+from .cache_service import CacheService
+
+logger = logging.getLogger(__name__)
+
+
+class BindingMgmtService:
+    """绑定码管理服务类"""
+    
+    CACHE_NAMESPACE = "binding_mgmt"
+    
+    @staticmethod
+    async def get_binding_codes_list(
+        status_filter: Optional[str] = None,
+        search_query: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20
+    ) -> Dict[str, Any]:
+        """
+        获取绑定码列表
+        
+        Args:
+            status_filter: 状态筛选 (used/unused)
+            search_query: 搜索关键词
+            page: 页码
+            per_page: 每页数量
+            
+        Returns:
+            dict: 绑定码列表数据
+        """
+        try:
+            # 构建筛选参数
+            filters = {}
+            if status_filter == 'used':
+                filters['is_used'] = True
+            elif status_filter == 'unused':
+                filters['is_used'] = False
+            if search_query:
+                filters['search'] = search_query
+            
+            # 获取绑定码数据
+            binding_codes = await binding_codes_manager.get_binding_codes_with_pagination(
+                **filters,
+                limit=per_page,
+                offset=(page - 1) * per_page
+            )
+            
+            # 获取总数
+            total_codes = await binding_codes_manager.count_binding_codes(**filters)
+            
+            # 获取绑定码统计
+            stats = await BindingMgmtService._get_binding_statistics()
+            
+            return {
+                'binding_codes': binding_codes,
+                'pagination': {
+                    'page': page,
+                    'per_page': per_page,
+                    'total': total_codes,
+                    'pages': (total_codes + per_page - 1) // per_page
+                },
+                'filters': {
+                    'status_filter': status_filter,
+                    'search_query': search_query
+                },
+                'statistics': stats,
+                'status_options': {
+                    'used': '已使用',
+                    'unused': '未使用'
+                },
+                'success': True
+            }
+            
+        except Exception as e:
+            logger.error(f"获取绑定码列表失败: {e}")
+            return {
+                'binding_codes': [],
+                'pagination': {'page': page, 'per_page': per_page, 'total': 0, 'pages': 0},
+                'filters': {},
+                'statistics': {},
+                'status_options': {},
+                'success': False,
+                'error': str(e)
+            }
+    
+    @staticmethod
+    async def get_binding_code_detail(code_id: int) -> Dict[str, Any]:
+        """
+        获取绑定码详情
+        
+        Args:
+            code_id: 绑定码ID
+            
+        Returns:
+            dict: 绑定码详情数据
+        """
+        try:
+            binding_code = await binding_codes_manager.get_binding_code_by_id(code_id)
+            if not binding_code:
+                return {'success': False, 'error': '绑定码不存在'}
+            
+            # 获取关联的商户信息
+            merchant = None
+            if binding_code.get('used_by_merchant_id'):
+                merchant = await merchant_manager.get_merchant_by_id(binding_code['used_by_merchant_id'])
+            
+            return {
+                'binding_code': binding_code,
+                'merchant': merchant,
+                'success': True
+            }
+            
+        except Exception as e:
+            logger.error(f"获取绑定码详情失败: code_id={code_id}, error={e}")
+            return {'success': False, 'error': str(e)}
+    
+    @staticmethod
+    async def create_binding_codes(count: int, prefix: str = "BC", notes: Optional[str] = None) -> Dict[str, Any]:
+        """
+        批量创建绑定码
+        
+        Args:
+            count: 创建数量
+            prefix: 绑定码前缀
+            notes: 备注
+            
+        Returns:
+            dict: 创建结果
+        """
+        try:
+            if count <= 0 or count > 1000:
+                return {'success': False, 'error': '创建数量必须在1-1000之间'}
+            
+            created_codes = []
+            failed_count = 0
+            
+            for _ in range(count):
+                try:
+                    # 生成唯一的绑定码
+                    binding_code = f"{prefix}{secrets.token_hex(6).upper()}"
+                    
+                    # 检查是否已存在
+                    existing = await binding_codes_manager.get_binding_code_by_code(binding_code)
+                    if existing:
+                        # 重新生成
+                        binding_code = f"{prefix}{secrets.token_hex(8).upper()}"
+                    
+                    code_id = await binding_codes_manager.create_binding_code(binding_code, notes)
+                    
+                    if code_id:
+                        created_codes.append({
+                            'id': code_id,
+                            'binding_code': binding_code,
+                            'notes': notes,
+                            'created_time': datetime.now().isoformat()
+                        })
+                    else:
+                        failed_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"创建单个绑定码失败: {e}")
+                    failed_count += 1
+            
+            success_count = len(created_codes)
+            
+            if success_count > 0:
+                # 清除相关缓存
+                CacheService.clear_namespace(BindingMgmtService.CACHE_NAMESPACE)
+                CacheService.clear_namespace("dashboard")
+            
+            logger.info(f"批量创建绑定码完成: 成功{success_count}个, 失败{failed_count}个")
+            
+            return {
+                'success': success_count > 0,
+                'created_codes': created_codes,
+                'success_count': success_count,
+                'failed_count': failed_count,
+                'message': f'成功创建 {success_count} 个绑定码，失败 {failed_count} 个'
+            }
+            
+        except Exception as e:
+            logger.error(f"批量创建绑定码失败: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    @staticmethod
+    async def update_binding_code(code_id: int, notes: Optional[str] = None) -> Dict[str, Any]:
+        """
+        更新绑定码信息
+        
+        Args:
+            code_id: 绑定码ID
+            notes: 新备注
+            
+        Returns:
+            dict: 更新结果
+        """
+        try:
+            result = await binding_codes_manager.update_binding_code_notes(code_id, notes)
+            
+            if result:
+                # 清除相关缓存
+                CacheService.clear_namespace(BindingMgmtService.CACHE_NAMESPACE)
+                
+                logger.info(f"绑定码信息更新成功: code_id={code_id}")
+                return {'success': True, 'message': '绑定码信息更新成功'}
+            else:
+                return {'success': False, 'error': '绑定码信息更新失败'}
+                
+        except Exception as e:
+            logger.error(f"更新绑定码信息失败: code_id={code_id}, error={e}")
+            return {'success': False, 'error': str(e)}
+    
+    @staticmethod
+    async def delete_binding_codes(code_ids: List[int]) -> Dict[str, Any]:
+        """
+        批量删除绑定码
+        
+        Args:
+            code_ids: 绑定码ID列表
+            
+        Returns:
+            dict: 删除结果
+        """
+        try:
+            if not code_ids:
+                return {'success': False, 'error': '未选择绑定码'}
+            
+            success_count = 0
+            failed_count = 0
+            errors = []
+            
+            for code_id in code_ids:
+                try:
+                    # 检查绑定码是否已被使用
+                    binding_code = await binding_codes_manager.get_binding_code_by_id(code_id)
+                    if binding_code and binding_code.get('is_used'):
+                        failed_count += 1
+                        errors.append(f"绑定码 {code_id} 已被使用，无法删除")
+                        continue
+                    
+                    result = await binding_codes_manager.delete_binding_code(code_id)
+                    if result:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                        errors.append(f"绑定码 {code_id} 删除失败")
+                        
+                except Exception as e:
+                    failed_count += 1
+                    errors.append(f"绑定码 {code_id} 删除异常: {str(e)}")
+            
+            # 清除相关缓存
+            if success_count > 0:
+                CacheService.clear_namespace(BindingMgmtService.CACHE_NAMESPACE)
+                CacheService.clear_namespace("dashboard")
+            
+            return {
+                'success': success_count > 0,
+                'success_count': success_count,
+                'failed_count': failed_count,
+                'errors': errors,
+                'message': f'成功删除 {success_count} 个绑定码，失败 {failed_count} 个'
+            }
+            
+        except Exception as e:
+            logger.error(f"批量删除绑定码失败: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    @staticmethod
+    async def reset_binding_code(code_id: int) -> Dict[str, Any]:
+        """
+        重置绑定码（清除使用状态）
+        
+        Args:
+            code_id: 绑定码ID
+            
+        Returns:
+            dict: 重置结果
+        """
+        try:
+            binding_code = await binding_codes_manager.get_binding_code_by_id(code_id)
+            if not binding_code:
+                return {'success': False, 'error': '绑定码不存在'}
+            
+            if not binding_code.get('is_used'):
+                return {'success': False, 'error': '绑定码未被使用，无需重置'}
+            
+            result = await binding_codes_manager.reset_binding_code(code_id)
+            
+            if result:
+                # 清除相关缓存
+                CacheService.clear_namespace(BindingMgmtService.CACHE_NAMESPACE)
+                CacheService.clear_namespace("dashboard")
+                
+                logger.info(f"绑定码重置成功: code_id={code_id}")
+                return {'success': True, 'message': '绑定码重置成功'}
+            else:
+                return {'success': False, 'error': '绑定码重置失败'}
+                
+        except Exception as e:
+            logger.error(f"重置绑定码失败: code_id={code_id}, error={e}")
+            return {'success': False, 'error': str(e)}
+    
+    @staticmethod
+    async def validate_binding_code(binding_code: str) -> Dict[str, Any]:
+        """
+        验证绑定码有效性
+        
+        Args:
+            binding_code: 绑定码
+            
+        Returns:
+            dict: 验证结果
+        """
+        try:
+            code_info = await binding_codes_manager.get_binding_code_by_code(binding_code)
+            
+            if not code_info:
+                return {
+                    'valid': False,
+                    'message': '绑定码不存在',
+                    'code_info': None
+                }
+            
+            if code_info.get('is_used'):
+                return {
+                    'valid': False,
+                    'message': '绑定码已被使用',
+                    'code_info': code_info
+                }
+            
+            return {
+                'valid': True,
+                'message': '绑定码有效',
+                'code_info': code_info
+            }
+            
+        except Exception as e:
+            logger.error(f"验证绑定码失败: binding_code={binding_code}, error={e}")
+            return {
+                'valid': False,
+                'message': '验证过程中出现错误',
+                'code_info': None,
+                'error': str(e)
+            }
+    
+    @staticmethod
+    async def get_binding_analytics() -> Dict[str, Any]:
+        """
+        获取绑定码分析数据
+        
+        Returns:
+            dict: 绑定码分析数据
+        """
+        try:
+            cache_key = "binding_analytics"
+            cached_data = CacheService.get(BindingMgmtService.CACHE_NAMESPACE, cache_key)
+            if cached_data is not None:
+                return cached_data
+            
+            # 获取绑定码分析数据
+            analytics_data = {
+                'total_codes': await binding_codes_manager.count_binding_codes(),
+                'used_codes': await binding_codes_manager.count_binding_codes(is_used=True),
+                'unused_codes': await binding_codes_manager.count_binding_codes(is_used=False),
+                'usage_rate': await BindingMgmtService._calculate_usage_rate(),
+                'usage_trends': await BindingMgmtService._get_usage_trends(),
+                'recent_usage': await BindingMgmtService._get_recent_usage()
+            }
+            
+            # 缓存15分钟
+            CacheService.set(BindingMgmtService.CACHE_NAMESPACE, cache_key, analytics_data, 900)
+            return analytics_data
+            
+        except Exception as e:
+            logger.error(f"获取绑定码分析数据失败: {e}")
+            return {'error': str(e)}
+    
+    @staticmethod
+    async def _get_binding_statistics() -> Dict[str, Any]:
+        """获取绑定码统计"""
+        try:
+            cache_key = "binding_stats"
+            cached_stats = CacheService.get(BindingMgmtService.CACHE_NAMESPACE, cache_key)
+            if cached_stats is not None:
+                return cached_stats
+            
+            total_codes = await binding_codes_manager.count_binding_codes()
+            used_codes = await binding_codes_manager.count_binding_codes(is_used=True)
+            
+            stats = {
+                'total_codes': total_codes,
+                'used_codes': used_codes,
+                'unused_codes': total_codes - used_codes,
+                'usage_rate': (used_codes / total_codes * 100) if total_codes > 0 else 0.0
+            }
+            
+            # 缓存10分钟
+            CacheService.set(BindingMgmtService.CACHE_NAMESPACE, cache_key, stats, 600)
+            return stats
+            
+        except Exception as e:
+            logger.error(f"获取绑定码统计失败: {e}")
+            return {}
+    
+    @staticmethod
+    async def _calculate_usage_rate() -> float:
+        """计算使用率"""
+        try:
+            stats = await BindingMgmtService._get_binding_statistics()
+            return stats.get('usage_rate', 0.0)
+        except Exception as e:
+            logger.error(f"计算使用率失败: {e}")
+            return 0.0
+    
+    @staticmethod
+    async def _get_usage_trends() -> Dict[str, Any]:
+        """获取使用趋势"""
+        try:
+            # TODO: 实现使用趋势统计逻辑
+            return {}
+        except Exception as e:
+            logger.error(f"获取使用趋势失败: {e}")
+            return {}
+    
+    @staticmethod
+    async def _get_recent_usage(limit: int = 10) -> List[Dict[str, Any]]:
+        """获取最近使用记录"""
+        try:
+            return await binding_codes_manager.get_recently_used_codes(limit)
+        except Exception as e:
+            logger.error(f"获取最近使用记录失败: {e}")
+            return []

@@ -1,0 +1,168 @@
+# -*- coding: utf-8 -*-
+"""
+地区管理路由模块
+处理城市、区县管理和地区筛选功能
+"""
+
+import logging
+from fasthtml.common import *
+from starlette.requests import Request
+from starlette.responses import RedirectResponse
+
+# 导入布局和认证组件
+from ..layout import create_layout, require_auth
+
+logger = logging.getLogger(__name__)
+
+
+@require_auth
+async def regions_list(request: Request):
+    """地区管理页面"""
+    try:
+        # 导入地区管理器
+        from database.db_regions import region_manager
+        
+        # 获取地区数据
+        cities = await region_manager.get_all_cities()
+        districts = await region_manager.get_all_districts()
+        
+        # 获取URL参数
+        params = request.query_params
+        success_msg = None
+        error_msg = None
+        
+        if params.get('city_added'):
+            success_msg = "城市添加成功！"
+        elif params.get('district_added'):
+            success_msg = "地区添加成功！"
+        elif params.get('error'):
+            error_msg = "操作失败！"
+        
+        # 创建页面内容
+        content = Div(
+            # 页面头部
+            Div(
+                H1("地区管理", cls="page-title"),
+                P("管理城市和区县信息", cls="page-subtitle"),
+                cls="page-header"
+            ),
+            
+            # 成功/错误消息
+            *([Div(success_msg, cls="alert alert-success mb-4")] if success_msg else []),
+            *([Div(error_msg, cls="alert alert-error mb-4")] if error_msg else []),
+            
+            # 统计卡片
+            Div(
+                Div(
+                    Div("城市总数", cls="stat-title"),
+                    Div(str(len(cities)), cls="stat-value text-primary"),
+                    cls="stat"
+                ),
+                Div(
+                    Div("区县总数", cls="stat-title"),
+                    Div(str(len(districts)), cls="stat-value text-success"),
+                    cls="stat"
+                ),
+                cls="stats shadow mb-6"
+            ),
+            
+            # 城市列表
+            Div(
+                H3("城市列表", cls="text-lg font-semibold mb-4"),
+                Div(
+                    Table(
+                        Thead(
+                            Tr(
+                                Th("ID"),
+                                Th("城市名称"),
+                                Th("状态"),
+                                Th("操作")
+                            )
+                        ),
+                        Tbody(
+                            *[
+                                Tr(
+                                    Td(str(city.get('id', '-'))),
+                                    Td(city.get('name', '-')),
+                                    Td(
+                                        Span("启用" if city.get('enabled', True) else "禁用",
+                                             cls=f"badge {'badge-success' if city.get('enabled', True) else 'badge-error'}")
+                                    ),
+                                    Td(
+                                        A("编辑", href="#", cls="btn btn-sm btn-outline")
+                                    )
+                                )
+                                for city in cities
+                            ] if cities else [
+                                Tr(
+                                    Td("暂无城市数据", colspan="4", cls="text-center text-gray-500")
+                                )
+                            ]
+                        ),
+                        cls="table table-zebra w-full"
+                    ),
+                    cls="overflow-x-auto"
+                ),
+                cls="card bg-base-100 shadow-xl p-6 mb-6"
+            ),
+            
+            # 区县列表
+            Div(
+                H3("区县列表", cls="text-lg font-semibold mb-4"),
+                Div(
+                    Table(
+                        Thead(
+                            Tr(
+                                Th("ID"),
+                                Th("区县名称"),
+                                Th("所属城市"),
+                                Th("状态"),
+                                Th("操作")
+                            )
+                        ),
+                        Tbody(
+                            *[
+                                Tr(
+                                    Td(str(district.get('id', '-'))),
+                                    Td(district.get('name', '-')),
+                                    Td(district.get('city_name', '-')),
+                                    Td(
+                                        Span("启用" if district.get('enabled', True) else "禁用",
+                                             cls=f"badge {'badge-success' if district.get('enabled', True) else 'badge-error'}")
+                                    ),
+                                    Td(
+                                        A("编辑", href="#", cls="btn btn-sm btn-outline")
+                                    )
+                                )
+                                for district in districts
+                            ] if districts else [
+                                Tr(
+                                    Td("暂无区县数据", colspan="5", cls="text-center text-gray-500")
+                                )
+                            ]
+                        ),
+                        cls="table table-zebra w-full"
+                    ),
+                    cls="overflow-x-auto"
+                ),
+                cls="card bg-base-100 shadow-xl p-6"
+            ),
+            
+            cls="page-content"
+        )
+        
+        return create_layout("地区管理", content)
+        
+    except Exception as e:
+        logger.error(f"地区管理页面错误: {e}")
+        import traceback
+        logger.error(f"完整堆栈: {traceback.format_exc()}")
+        error_content = Div(
+            H1("地区管理错误", cls="text-2xl font-bold text-red-600 mb-4"),
+            Pre(f"{str(e)}\n\n{traceback.format_exc()}", cls="bg-gray-100 p-4 rounded text-sm")
+        )
+        return create_layout("系统错误", error_content)
+
+
+# 路由注册在 web/app.py 中进行
+# 这里只提供路由函数

@@ -1,0 +1,17 @@
+{
+  "test_summary": {
+    "total_tests": 1,
+    "passed_tests": 0,
+    "failed_tests": 1,
+    "skipped_tests": 0,
+    "warning_tests": 0,
+    "success_rate": "0.0%",
+    "total_duration": "0.00秒"
+  },
+  "test_cases": [],
+  "conclusion": "FAIL",
+  "recommendations": [
+    "⚠️ 存在失败测试，需要修复相关功能"
+  ],
+  "timestamp": "2025-09-13T14:11:15.293734"
+}

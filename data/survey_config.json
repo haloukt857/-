@@ -1,0 +1,184 @@
+{
+  "step_order": [
+    "region",
+    "category",
+    "name",
+    "contact",
+    "confirm"
+  ],
+  "steps": {
+    "region": {
+      "question": "📍 请选择您的服务地区：",
+      "data_key": "region",
+      "options": [
+        {
+          "text": "🏙️ 闵行",
+          "value": "beijing"
+        },
+        {
+          "text": "🏙️ 上海",
+          "value": "shanghai"
+        },
+        {
+          "text": "🏙️ 广州",
+          "value": "guangzhou"
+        },
+        {
+          "text": "🏙️ 深圳",
+          "value": "shenzhen"
+        },
+        {
+          "text": "🏙️ 杭州",
+          "value": "hangzhou"
+        },
+        {
+          "text": "🏙️ 成都",
+          "value": "chengdu"
+        },
+        {
+          "text": "🏙️ 西安",
+          "value": "xian"
+        },
+        {
+          "text": "🏙️ 南京",
+          "value": "nanjing"
+        },
+        {
+          "text": "🌍 其他城市",
+          "value": "other"
+        }
+      ],
+      "required": true,
+      "allow_custom_input": false
+    },
+    "category": {
+      "question": "🏷️ 请选择您的服务类别：",
+      "data_key": "category",
+      "options": [
+        {
+          "text": "📚 教育培训",
+          "value": "education"
+        },
+        {
+          "text": "💄 美容美发",
+          "value": "beauty"
+        },
+        {
+          "text": "🍽️ 餐饮服务",
+          "value": "food"
+        },
+        {
+          "text": "🛠️ 维修服务",
+          "value": "repair"
+        },
+        {
+          "text": "🏥 健康医疗",
+          "value": "health"
+        },
+        {
+          "text": "🎨 艺术创作",
+          "value": "art"
+        },
+        {
+          "text": "💼 商务服务",
+          "value": "business"
+        },
+        {
+          "text": "🚚 物流配送",
+          "value": "logistics"
+        },
+        {
+          "text": "🏠 家政服务",
+          "value": "housekeeping"
+        },
+        {
+          "text": "📦 其他服务",
+          "value": "other"
+        }
+      ],
+      "required": true,
+      "allow_custom_input": false
+    },
+    "name": {
+      "question": "👤 请选择您的称呼方式：",
+      "data_key": "name",
+      "options": [
+        {
+          "text": "👨‍🏫 老师",
+          "value": "老师"
+        },
+        {
+          "text": "👩‍💼 经理",
+          "value": "经理"
+        },
+        {
+          "text": "👨‍⚕️ 医生",
+          "value": "医生"
+        },
+        {
+          "text": "👩‍🍳 师傅",
+          "value": "师傅"
+        },
+        {
+          "text": "👨‍💼 老板",
+          "value": "老板"
+        },
+        {
+          "text": "👩‍🎨 设计师",
+          "value": "设计师"
+        },
+        {
+          "text": "✍️ 自定义输入",
+          "value": "custom_input"
+        }
+      ],
+      "required": true,
+      "allow_custom_input": true
+    },
+    "contact": {
+      "question": "📞 请输入您的联系方式（微信号/QQ号/手机号）：",
+      "data_key": "contact_info",
+      "options": [
+        {
+          "text": "📱 微信：wx123456",
+          "value": "wechat"
+        },
+        {
+          "text": "📧 QQ：12345678",
+          "value": "qq"
+        },
+        {
+          "text": "☎️ 手机：13812345678",
+          "value": "phone"
+        },
+        {
+          "text": "✍️ 手动输入",
+          "value": "custom_input"
+        }
+      ],
+      "required": true,
+      "allow_custom_input": true
+    },
+    "confirm": {
+      "question": "✅ 请确认您的注册信息：",
+      "data_key": "confirmation",
+      "options": [
+        {
+          "text": "✅ 确认注册",
+          "value": "confirm"
+        },
+        {
+          "text": "✏️ 修改信息",
+          "value": "edit"
+        },
+        {
+          "text": "❌ 取消注册",
+          "value": "cancel"
+        }
+      ],
+      "required": true,
+      "allow_custom_input": false
+    }
+  },
+  "profile_template": "🏪 **商家资料**\n\n👤 **称呼：** {name}\n📍 **服务地区：** {region_display}\n🏷️ **服务类别：** {category_display}\n📞 **联系方式：** {contact_info}\n\n⏰ **注册时间：** {registration_time}\n🆔 **商家编号：** {merchant_id}"
+}

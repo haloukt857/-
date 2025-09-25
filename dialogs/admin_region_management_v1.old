@@ -1,0 +1,543 @@
+"""
+管理员地区管理对话流程
+提供省份和区域的完整CRUD管理功能
+"""
+
+import logging
+from typing import Dict, List, Optional, Any
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
+
+from database.db_regions import RegionManager
+from config import MESSAGE_TEMPLATES
+
+logger = logging.getLogger(__name__)
+
+
+class AdminRegionManagement:
+    """管理员地区管理对话流程"""
+    
+    def __init__(self):
+        self.province_db = ProvinceDatabase()
+        self.region_db = RegionDatabase()
+        # 临时状态存储
+        self.user_states: Dict[int, Dict] = {}
+    
+    async def initialize(self):
+        """初始化管理器"""
+        logger.info("管理员地区管理系统初始化完成")
+    
+    def _get_user_state(self, user_id: int) -> Dict:
+        """获取用户状态"""
+        if user_id not in self.user_states:
+            self.user_states[user_id] = {
+                'action': None,
+                'selected_province_id': None,
+                'selected_region_id': None,
+                'editing_data': {}
+            }
+        return self.user_states[user_id]
+    
+    def _clear_user_state(self, user_id: int):
+        """清除用户状态"""
+        if user_id in self.user_states:
+            del self.user_states[user_id]
+    
+    async def show_main_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """显示地区管理主菜单"""
+        try:
+            keyboard = [
+                [
+                    InlineKeyboardButton("🏙️ 省份管理", callback_data="admin_region_provinces"),
+                    InlineKeyboardButton("🏛️ 区域管理", callback_data="admin_region_regions")
+                ],
+                [
+                    InlineKeyboardButton("📊 统计信息", callback_data="admin_region_stats"),
+                    InlineKeyboardButton("🔄 同步数据", callback_data="admin_region_sync")
+                ],
+                [InlineKeyboardButton("↩️ 返回管理菜单", callback_data="admin_main")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = (
+                "🌍 地区管理系统\n\n"
+                "选择要管理的内容：\n"
+                "• 省份管理 - 添加、编辑、删除省份\n"
+                "• 区域管理 - 管理区域信息\n"
+                "• 统计信息 - 查看地区数据统计\n"
+                "• 同步数据 - 手动同步地区数据"
+            )
+            
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=reply_markup,
+                    parse_mode=None
+                )
+            else:
+                await update.message.reply_text(
+                    text=message,
+                    reply_markup=reply_markup,
+                    parse_mode=None
+                )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"显示地区管理主菜单失败: {e}")
+            return False
+    
+    async def handle_province_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """处理省份管理"""
+        try:
+            provinces = await self.province_db.get_all_provinces()
+            
+            keyboard = []
+            # 添加现有省份的管理按钮
+            for province in provinces:
+                status_icon = "✅" if province['is_active'] else "❌"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{status_icon} {province['name']} ({province['region_count']}个区域)",
+                        callback_data=f"admin_province_edit_{province['id']}"
+                    )
+                ])
+            
+            # 操作按钮
+            keyboard.extend([
+                [InlineKeyboardButton("➕ 添加新省份", callback_data="admin_province_add")],
+                [
+                    InlineKeyboardButton("📊 省份统计", callback_data="admin_province_stats"),
+                    InlineKeyboardButton("🔄 刷新列表", callback_data="admin_region_provinces")
+                ],
+                [InlineKeyboardButton("↩️ 返回地区管理", callback_data="admin_region_main")]
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = (
+                f"🏙️ 省份管理\n\n"
+                f"当前共有 {len(provinces)} 个省份\n\n"
+                "点击省份名称进行编辑，或选择其他操作：\n"
+                "✅ = 激活状态  ❌ = 禁用状态\n"
+                "数字表示该省份下的区域数量"
+            )
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"处理省份管理失败: {e}")
+            await update.callback_query.answer("❌ 加载省份列表失败", show_alert=True)
+            return False
+    
+    async def handle_region_management(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """处理区域管理"""
+        try:
+            provinces = await self.province_db.get_provinces_for_buttons()
+            
+            keyboard = []
+            # 按省份显示区域管理入口
+            for province in provinces:
+                region_count = await self.region_db.count_regions_by_province(province['id'])
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"🏛️ {province['name']} ({region_count}个区域)",
+                        callback_data=f"admin_regions_by_province_{province['id']}"
+                    )
+                ])
+            
+            # 操作按钮
+            keyboard.extend([
+                [
+                    InlineKeyboardButton("➕ 快速添加区域", callback_data="admin_region_quick_add"),
+                    InlineKeyboardButton("📊 区域统计", callback_data="admin_region_stats")
+                ],
+                [InlineKeyboardButton("↩️ 返回地区管理", callback_data="admin_region_main")]
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = (
+                "🏛️ 区域管理\n\n"
+                "选择省份来管理其下属区域：\n"
+                "数字表示该省份下的区域数量"
+            )
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"处理区域管理失败: {e}")
+            await update.callback_query.answer("❌ 加载区域管理失败", show_alert=True)
+            return False
+    
+    async def handle_add_province(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """开始添加新省份流程"""
+        try:
+            user_id = update.effective_user.id
+            state = self._get_user_state(user_id)
+            state['action'] = 'adding_province'
+            
+            keyboard = [[InlineKeyboardButton("❌ 取消", callback_data="admin_region_provinces")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            message = (
+                "➕ 添加新省份\n\n"
+                "请输入省份名称：\n"
+                "• 名称应该清晰明确\n"
+                "• 不能与现有省份重复\n"
+                "• 建议使用标准省份名称"
+            )
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"开始添加省份流程失败: {e}")
+            return False
+    
+    async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """处理文本输入"""
+        try:
+            user_id = update.effective_user.id
+            state = self._get_user_state(user_id)
+            text = update.message.text.strip()
+            
+            if state['action'] == 'adding_province':
+                return await self._process_add_province(update, context, text)
+            elif state['action'] == 'editing_province_name':
+                return await self._process_edit_province_name(update, context, text)
+            elif state['action'] == 'adding_region':
+                return await self._process_add_region(update, context, text)
+            elif state['action'] == 'editing_region_name':
+                return await self._process_edit_region_name(update, context, text)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"处理文本输入失败: {e}")
+            return False
+    
+    async def _process_add_province(self, update: Update, context: ContextTypes.DEFAULT_TYPE, name: str) -> bool:
+        """处理添加省份"""
+        try:
+            user_id = update.effective_user.id
+            
+            # 检查名称是否已存在
+            existing = await self.province_db.get_province_by_name(name)
+            if existing:
+                await update.message.reply_text(
+                    f"❌ 省份 '{name}' 已经存在！\n请输入不同的名称：",
+                    parse_mode=None
+                )
+                return True
+            
+            # 添加省份
+            province_id = await self.province_db.create_province(name)
+            if province_id:
+                self._clear_user_state(user_id)
+                
+                keyboard = [
+                    [InlineKeyboardButton("➕ 继续添加", callback_data="admin_province_add")],
+                    [InlineKeyboardButton("🏛️ 添加区域", callback_data=f"admin_regions_by_province_{province_id}")],
+                    [InlineKeyboardButton("↩️ 返回省份管理", callback_data="admin_region_provinces")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"✅ 添加成功！\n\n"
+                    f"省份 '{name}' 已成功添加\n"
+                    f"ID: {province_id}",
+                    reply_markup=reply_markup,
+                    parse_mode=None
+                )
+                return True
+            else:
+                await update.message.reply_text("❌ 添加省份失败，请重试")
+                return False
+                
+        except Exception as e:
+            logger.error(f"添加省份失败: {e}")
+            await update.message.reply_text("❌ 添加省份时发生错误")
+            return False
+    
+    async def handle_edit_province(self, update: Update, context: ContextTypes.DEFAULT_TYPE, province_id: int) -> bool:
+        """处理编辑省份"""
+        try:
+            province = await self.province_db.get_province_by_id(province_id)
+            if not province:
+                await update.callback_query.answer("❌ 省份不存在", show_alert=True)
+                return False
+            
+            regions = await self.region_db.get_regions_by_province(province_id)
+            
+            keyboard = [
+                [InlineKeyboardButton("✏️ 编辑名称", callback_data=f"admin_province_edit_name_{province_id}")],
+                [
+                    InlineKeyboardButton(
+                        "🔄 切换状态" if province['is_active'] else "✅ 启用省份",
+                        callback_data=f"admin_province_toggle_{province_id}"
+                    ),
+                    InlineKeyboardButton("📊 调整排序", callback_data=f"admin_province_order_{province_id}")
+                ],
+                [InlineKeyboardButton("🏛️ 管理区域", callback_data=f"admin_regions_by_province_{province_id}")],
+            ]
+            
+            # 只有在没有区域时才允许删除
+            if len(regions) == 0:
+                keyboard.append([InlineKeyboardButton("🗑️ 删除省份", callback_data=f"admin_province_delete_{province_id}")])
+            
+            keyboard.append([InlineKeyboardButton("↩️ 返回省份管理", callback_data="admin_region_provinces")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            status = "✅ 激活" if province['is_active'] else "❌ 禁用"
+            message = (
+                f"✏️ 编辑省份: {province['name']}\n\n"
+                f"ID: {province['id']}\n"
+                f"状态: {status}\n"
+                f"排序: {province['display_order']}\n"
+                f"区域数量: {len(regions)}\n"
+                f"创建时间: {province['created_at'][:19]}\n"
+                f"更新时间: {province['updated_at'][:19]}"
+            )
+            
+            if len(regions) > 0:
+                message += f"\n\n⚠️ 该省份下有 {len(regions)} 个区域，无法删除"
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"编辑省份失败: {e}")
+            await update.callback_query.answer("❌ 加载省份信息失败", show_alert=True)
+            return False
+    
+    async def handle_toggle_province(self, update: Update, context: ContextTypes.DEFAULT_TYPE, province_id: int) -> bool:
+        """切换省份状态"""
+        try:
+            province = await self.province_db.get_province_by_id(province_id)
+            if not province:
+                await update.callback_query.answer("❌ 省份不存在", show_alert=True)
+                return False
+            
+            new_status = not province['is_active']
+            success = await self.province_db.update_province_status(province_id, new_status)
+            
+            if success:
+                status_text = "激活" if new_status else "禁用"
+                await update.callback_query.answer(f"✅ 省份已{status_text}")
+                # 刷新编辑界面
+                return await self.handle_edit_province(update, context, province_id)
+            else:
+                await update.callback_query.answer("❌ 更新失败", show_alert=True)
+                return False
+                
+        except Exception as e:
+            logger.error(f"切换省份状态失败: {e}")
+            await update.callback_query.answer("❌ 操作失败", show_alert=True)
+            return False
+    
+    async def handle_regions_by_province(self, update: Update, context: ContextTypes.DEFAULT_TYPE, province_id: int) -> bool:
+        """显示指定省份下的区域管理"""
+        try:
+            province = await self.province_db.get_province_by_id(province_id)
+            if not province:
+                await update.callback_query.answer("❌ 省份不存在", show_alert=True)
+                return False
+            
+            regions = await self.region_db.get_regions_by_province(province_id)
+            
+            keyboard = []
+            # 添加现有区域的管理按钮
+            for region in regions:
+                status_icon = "✅" if region['is_active'] else "❌"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{status_icon} {region['name']}",
+                        callback_data=f"admin_region_edit_{region['id']}"
+                    )
+                ])
+            
+            # 操作按钮
+            keyboard.extend([
+                [InlineKeyboardButton("➕ 添加区域", callback_data=f"admin_region_add_{province_id}")],
+                [
+                    InlineKeyboardButton("🔄 刷新列表", callback_data=f"admin_regions_by_province_{province_id}"),
+                    InlineKeyboardButton("📊 统计信息", callback_data=f"admin_region_stats_{province_id}")
+                ],
+                [InlineKeyboardButton("↩️ 返回区域管理", callback_data="admin_region_regions")]
+            ])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = (
+                f"🏛️ {province['name']} - 区域管理\n\n"
+                f"当前共有 {len(regions)} 个区域\n\n"
+                "点击区域名称进行编辑：\n"
+                "✅ = 激活状态  ❌ = 禁用状态"
+            )
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"显示省份区域失败: {e}")
+            await update.callback_query.answer("❌ 加载区域列表失败", show_alert=True)
+            return False
+    
+    async def handle_add_region(self, update: Update, context: ContextTypes.DEFAULT_TYPE, province_id: int) -> bool:
+        """开始添加区域流程"""
+        try:
+            user_id = update.effective_user.id
+            state = self._get_user_state(user_id)
+            state['action'] = 'adding_region'
+            state['selected_province_id'] = province_id
+            
+            province = await self.province_db.get_province_by_id(province_id)
+            
+            keyboard = [[InlineKeyboardButton("❌ 取消", callback_data=f"admin_regions_by_province_{province_id}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            message = (
+                f"➕ 添加区域到 {province['name']}\n\n"
+                "请输入区域名称：\n"
+                "• 名称应该清晰明确\n"
+                "• 不能与该省份现有区域重复\n"
+                "• 建议使用标准区域名称"
+            )
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"开始添加区域流程失败: {e}")
+            return False
+    
+    async def _process_add_region(self, update: Update, context: ContextTypes.DEFAULT_TYPE, name: str) -> bool:
+        """处理添加区域"""
+        try:
+            user_id = update.effective_user.id
+            state = self._get_user_state(user_id)
+            province_id = state['selected_province_id']
+            
+            # 检查名称在该省份内是否已存在
+            existing = await self.region_db.get_region_by_name_and_province(name, province_id)
+            if existing:
+                await update.message.reply_text(
+                    f"❌ 该省份内已存在区域 '{name}'！\n请输入不同的名称：",
+                    parse_mode=None
+                )
+                return True
+            
+            # 添加区域
+            region_id = await self.region_db.create_region(name, province_id)
+            if region_id:
+                self._clear_user_state(user_id)
+                
+                keyboard = [
+                    [InlineKeyboardButton("➕ 继续添加", callback_data=f"admin_region_add_{province_id}")],
+                    [InlineKeyboardButton("✏️ 编辑区域", callback_data=f"admin_region_edit_{region_id}")],
+                    [InlineKeyboardButton("↩️ 返回区域列表", callback_data=f"admin_regions_by_province_{province_id}")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"✅ 添加成功！\n\n"
+                    f"区域 '{name}' 已成功添加\n"
+                    f"ID: {region_id}",
+                    reply_markup=reply_markup,
+                    parse_mode=None
+                )
+                return True
+            else:
+                await update.message.reply_text("❌ 添加区域失败，请重试")
+                return False
+                
+        except Exception as e:
+            logger.error(f"添加区域失败: {e}")
+            await update.message.reply_text("❌ 添加区域时发生错误")
+            return False
+    
+    async def show_statistics(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """显示地区统计信息"""
+        try:
+            # 获取统计数据
+            provinces = await self.province_db.get_all_provinces()
+            active_provinces = [p for p in provinces if p['is_active']]
+            
+            total_regions = 0
+            active_regions = 0
+            
+            for province in provinces:
+                regions = await self.region_db.get_regions_by_province(province['id'])
+                total_regions += len(regions)
+                active_regions += len([c for c in regions if c['is_active']])
+            
+            keyboard = [
+                [InlineKeyboardButton("🏙️ 省份详情", callback_data="admin_province_stats")],
+                [InlineKeyboardButton("🏛️ 区域详情", callback_data="admin_region_stats")],
+                [InlineKeyboardButton("↩️ 返回地区管理", callback_data="admin_region_main")]
+            ]
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            message = (
+                f"📊 地区统计信息\n\n"
+                f"🏙️ 省份统计\n"
+                f"• 总计: {len(provinces)} 个\n"
+                f"• 激活: {len(active_provinces)} 个\n"
+                f"• 禁用: {len(provinces) - len(active_provinces)} 个\n\n"
+                f"🏛️ 区域统计\n"
+                f"• 总计: {total_regions} 个\n"
+                f"• 激活: {active_regions} 个\n"
+                f"• 禁用: {total_regions - active_regions} 个\n\n"
+                f"📈 平均数据\n"
+                f"• 平均每省区域数: {total_regions / len(provinces) if provinces else 0:.1f}"
+            )
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode=None
+            )
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"显示统计信息失败: {e}")
+            await update.callback_query.answer("❌ 获取统计信息失败", show_alert=True)
+            return False
+    
+    async def cleanup(self):
+        """清理资源"""
+        self.user_states.clear()
+        logger.info("地区管理系统已清理")

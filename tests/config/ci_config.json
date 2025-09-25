@@ -1,0 +1,69 @@
+{
+  "test_environment": "testing",
+  "log_level": "WARNING",
+  "debug_mode": false,
+  "verbose_output": false,
+  "test_timeout": 180,
+  "module_timeout": 900,
+  "suite_timeout": 3600,
+  "max_workers": 2,
+  "retry_attempts": 1,
+  "stop_on_failure": true,
+  "continue_on_error": false,
+  "enable_parallel_execution": true,
+  "max_parallel_modules": 2,
+  "module_isolation": true,
+  "cleanup_after_tests": true,
+  "preserve_test_data": false,
+  "reset_database": true,
+  "enable_performance_monitoring": false,
+  "enable_memory_profiling": false,
+  "enable_network_monitoring": false,
+  "enable_error_screenshots": false,
+  "disabled_modules": [],
+  "priority_modules": [
+    "admin_backend",
+    "merchant_onboarding", 
+    "post_lifecycle",
+    "user_experience",
+    "review_incentive"
+  ],
+  "database": {
+    "url": "sqlite:///data/ci_test_bot.db",
+    "backup_url": "sqlite:///data/ci_backup_bot.db",
+    "enable_wal_mode": false,
+    "timeout": 15,
+    "pool_size": 3,
+    "max_retries": 2
+  },
+  "telegram": {
+    "bot_token": "CI_TEST_BOT_TOKEN",
+    "test_user_ids": [11111111, 22222222],
+    "test_chat_id": -1001111111111,
+    "api_timeout": 15,
+    "mock_api_calls": true
+  },
+  "performance": {
+    "concurrent_users": 5,
+    "max_requests_per_second": 50,
+    "memory_limit_mb": 256,
+    "cpu_limit_percent": 90,
+    "enable_profiling": false
+  },
+  "reporting": {
+    "output_dir": "tests/reports",
+    "include_screenshots": false,
+    "generate_html": true,
+    "generate_json": true,
+    "generate_xml": true,
+    "include_performance_metrics": false
+  },
+  "custom_settings": {
+    "test_description": "CI/CD Automated Testing",
+    "test_version": "2.0.0-CI",
+    "author": "CI/CD Pipeline",
+    "contact": "ci@example.com",
+    "timeout_multiplier": 0.5,
+    "fast_mode": true
+  }
+}
