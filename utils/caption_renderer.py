@@ -32,6 +32,7 @@ async def _build_caption_context(
     """构造渲染所需上下文（供 MD / HTML 共享），避免文案与顺序漂移。"""
     mid = merchant.get("id")
     did = merchant.get("district_id")
+    cid = merchant.get("city_id")
     name = merchant.get("name") or "-"
     district_name = merchant.get("district_name") or "-"
     p_price = str(merchant.get("p_price") or "").strip()
@@ -41,8 +42,9 @@ async def _build_caption_context(
     bot_u = (bot_username or "").lstrip("@")
     link_merchant = f"https://t.me/{bot_u}?start=m_{mid}" if bot_u and mid else ""
     link_district = f"https://t.me/{bot_u}?start=d_{did}" if bot_u and did else ""
-    link_price_p = f"https://t.me/{bot_u}?start=price_p_{p_price}" if bot_u and p_price else ""
-    link_price_pp = f"https://t.me/{bot_u}?start=price_pp_{pp_price}" if bot_u and pp_price else ""
+    city_suffix = f"_c_{cid}" if cid else ""
+    link_price_p = f"https://t.me/{bot_u}?start=price_p_{p_price}{city_suffix}" if bot_u and p_price else ""
+    link_price_pp = f"https://t.me/{bot_u}?start=price_pp_{pp_price}{city_suffix}" if bot_u and pp_price else ""
     link_report = f"https://t.me/{bot_u}?start=report_{mid}" if bot_u and mid else ""
 
     # 关键词（最多3个）

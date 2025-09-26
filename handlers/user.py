@@ -446,14 +446,24 @@ async def start_command(message: Message, state: FSMContext):
     if payload.startswith('price_p_') or payload.startswith('price_pp_'):
         try:
             is_p = payload.startswith('price_p_')
+            rest = payload[len('price_p_'):] if is_p else payload[len('price_pp_'):]
+            # 支持附带城市上下文：price_p_{value}_c_{cityId}
+            city_id_from_link = None
+            if '_c_' in rest:
+                price_part, city_part = rest.split('_c_', 1)
+                val = int(price_part)
+                try:
+                    city_id_from_link = int(city_part)
+                except Exception:
+                    city_id_from_link = None
+            else:
+                val = int(rest)
             if is_p:
-                val = int(payload[len('price_p_'):])
                 items = await merchant_manager.list_active_by_price('p_price', val, limit=20)
             else:
-                val = int(payload[len('price_pp_'):])
                 items = await merchant_manager.list_active_by_price('pp_price', val, limit=20)
             # 若已有“当前城市”上下文，仅展示该城市商家
-            ctx_city_id = _get_user_city_ctx(message.from_user.id)
+            ctx_city_id = city_id_from_link or _get_user_city_ctx(message.from_user.id)
             if ctx_city_id:
                 try:
                     city = await region_manager.get_city_by_id(ctx_city_id)
