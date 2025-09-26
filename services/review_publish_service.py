@@ -138,39 +138,38 @@ class ReviewPublishService:
                 post_channel = None
             channel_url = (post_channel.get('channel_link') or '').strip() if post_channel else ''
 
-            report_line = f"报告 {html.escape(channel_url)}" if channel_url else "报告"
-            name_line = (f"艺名 <a href=\"{link_merchant}\">{_esc(merchant_name)}</a>" if link_merchant else f"艺名 {_esc(merchant_name)}")
-            loc_line = (f"位置 <a href=\"{link_district}\">{_esc(district_name)}</a>" if link_district else f"位置 {_esc(district_name)}")
-            # 费用：按订单课程类型与实际价格显示（仅显示被点击的 P 或 PP）
-            ct = (order.get('course_type') or '').upper() if order else ''
-            price_val = order.get('price') if order else None
-            price_str = str(price_val) if (price_val is not None) else ''
-            if ct == 'P' and price_str:
-                link_price = f"https://t.me/{bot_u}?start=price_p_{price_str}{city_suffix}" if bot_u else ''
-                fee_disp = f"{_esc(price_str)}P"
-                fee_line = f"费用 <a href=\"{link_price}\">{fee_disp}</a>" if link_price else f"费用 {fee_disp}"
-            elif ct == 'PP' and price_str:
-                link_price = f"https://t.me/{bot_u}?start=price_pp_{price_str}{city_suffix}" if bot_u else ''
-                fee_disp = f"{_esc(price_str)}PP"
-                fee_line = f"费用 <a href=\"{link_price}\">{fee_disp}</a>" if link_price else f"费用 {fee_disp}"
-            else:
-                fee_line = "费用"
-
-            rating_block = (
-                "<pre>"
-                f"外貌 {int(review.get('rating_appearance') or 0):02d} | {_score_bar(review.get('rating_appearance'))}\n"
-                f"身材 {int(review.get('rating_figure') or 0):02d} | {_score_bar(review.get('rating_figure'))}\n"
-                f"服务 {int(review.get('rating_service') or 0):02d} | {_score_bar(review.get('rating_service'))}\n"
-                f"态度 {int(review.get('rating_attitude') or 0):02d} | {_score_bar(review.get('rating_attitude'))}\n"
-                f"环境 {int(review.get('rating_environment') or 0):02d} | {_score_bar(review.get('rating_environment'))}"
-                "</pre>"
+            # 顶部信息（按指定模板，不带 deeplink）
+            report_line = f"🔖 报告 {html.escape(channel_url)}" if channel_url else "🔖 报告"
+            name_line = (
+                f"🔆 艺名 <a href=\"{link_merchant}\">{_esc(merchant_name)}</a>"
+                if link_merchant else f"🔆 艺名 {_esc(merchant_name)}"
+            )
+            loc_line = (
+                f"📌 位置 <a href=\"{link_district}\">{_esc(district_name)}</a>"
+                if link_district else f"📌 位置 {_esc(district_name)}"
             )
 
-            # 文本与尾注
-            body_lines = []
-            if review.get('text_review_by_user'):
-                body_lines.append(f"文字详情：\n{_esc(review.get('text_review_by_user'))}")
+            # 费用：展示 P 与 PP 两行（使用商户定价，携带城市上下文 deeplink）
+            fee_header = "✨ 费用"
+            p_price_val = merchant_obj.get('p_price') if merchant_obj else None
+            pp_price_val = merchant_obj.get('pp_price') if merchant_obj else None
+            p_price_str = str(p_price_val) if (p_price_val is not None and str(p_price_val) != '') else ''
+            pp_price_str = str(pp_price_val) if (pp_price_val is not None and str(pp_price_val) != '') else ''
+            line_p = (
+                f"  - P: <a href=\"https://t.me/{bot_u}?start=price_p_{p_price_str}{city_suffix}\">{_esc(p_price_str)}P</a>"
+                if (bot_u and p_price_str) else f"  - P: {_esc(p_price_str)}P"
+            )
+            line_pp = (
+                f"  - PP: <a href=\"https://t.me/{bot_u}?start=price_pp_{pp_price_str}{city_suffix}\">{_esc(pp_price_str)}PP</a>"
+                if (bot_u and pp_price_str) else f"  - PP: {_esc(pp_price_str)}PP"
+            )
 
+            # 文字详情（同一行展示）
+            detail_line = None
+            if review.get('text_review_by_user'):
+                detail_line = f"📜 文字详情： {_esc(review.get('text_review_by_user'))}"
+
+            # 留名与时间（同一行）
             from datetime import datetime
             date_disp = ''
             try:
@@ -183,13 +182,26 @@ class ReviewPublishService:
                     date_disp = dt.strftime('%Y.%m.%d')
             except Exception:
                 date_disp = ''
-            footer_line = f"留名 { _esc(user_disp or '') } ｜ 时间 {date_disp}".strip()
+            footer_line = f"🙋🏻 留名 {_esc(user_disp or '')} ｜ 🗓️ 时间 {date_disp}".strip()
 
-            text = "\n".join([report_line, name_line, loc_line, fee_line]) + "\n\n" + rating_block
-            if body_lines:
-                text += "\n\n" + "\n".join(body_lines)
-            if footer_line:
-                text += "\n\n" + footer_line
+            # 评分块（使用 <pre>）
+            rating_head = "🌟 总体评分："
+            rating_block = (
+                "<pre>"
+                f"▫️ 外貌 {int(review.get('rating_appearance') or 0):02d} | {_score_bar(review.get('rating_appearance'))}\n"
+                f"▫️ 身材 {int(review.get('rating_figure') or 0):02d} | {_score_bar(review.get('rating_figure'))}\n"
+                f"▫️ 服务 {int(review.get('rating_service') or 0):02d} | {_score_bar(review.get('rating_service'))}\n"
+                f"▫️ 态度 {int(review.get('rating_attitude') or 0):02d} | {_score_bar(review.get('rating_attitude'))}\n"
+                f"▫️ 环境 {int(review.get('rating_environment') or 0):02d} | {_score_bar(review.get('rating_environment'))}"
+                "</pre>"
+            )
+
+            # 组装：费用两行 → 空行 → 评分区；其后文字详情与留名
+            header_lines = [report_line, name_line, loc_line, fee_header, line_p, line_pp, "", rating_head]
+            text = "\n".join(header_lines) + "\n" + rating_block + "\n"
+            if detail_line:
+                text += detail_line + "\n\n"
+            text += footer_line + "\n\n"
 
             chat_id = channel.get('channel_chat_id')
             sent = await bot.send_message(chat_id, text, parse_mode='HTML')
