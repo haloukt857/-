@@ -230,6 +230,7 @@ class SchedulerWorker:
                         continue
                     # 调用Telegram Bot API发布帖子
                     sent_ok = False
+                    first_msg_id = None
                     try:
                         from html import escape as _escape
                         adv = None
@@ -271,7 +272,14 @@ class SchedulerWorker:
                             async with session.post(api_url, json={'chat_id': channel_chat_id, 'media': media_payload}, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                                 data = await resp.json()
                                 sent_ok = bool(data.get('ok'))
-                                if not sent_ok:
+                                if sent_ok:
+                                    try:
+                                        arr = data.get('result') or []
+                                        if isinstance(arr, list) and arr:
+                                            first_msg_id = int(arr[0].get('message_id'))
+                                    except Exception:
+                                        first_msg_id = None
+                                else:
                                     logger.error(f"发送媒体组失败: {data}")
                     except Exception as send_e:
                         logger.error(f"调用Telegram发送失败: {send_e}")
@@ -282,6 +290,32 @@ class SchedulerWorker:
                     ) if sent_ok else False
                     
                     if update_success and sent_ok:
+                        # 保存帖子链接
+                        try:
+                            def _build_post_link(chat_id_val: str, message_id_val: int) -> Optional[str]:
+                                try:
+                                    s = str(chat_id_val)
+                                    if s.startswith('@'):
+                                        username = s.lstrip('@')
+                                        return f"https://t.me/{username}/{message_id_val}"
+                                    if s.startswith('-100'):
+                                        internal = s[4:]
+                                        return f"https://t.me/c/{internal}/{message_id_val}"
+                                    return f"https://t.me/{s}/{message_id_val}"
+                                except Exception:
+                                    return None
+                            if first_msg_id:
+                                link = _build_post_link(str(channel_chat_id), int(first_msg_id))
+                                if link:
+                                    await MerchantManager.set_post_url(merchant_id, link)
+                        except Exception as _e:
+                            logger.warning(f"保存帖子链接失败: {_e}")
+                        # 首次发布后刷新评价区（将所有U2M评价链接加入caption）
+                        try:
+                            from services.review_publish_service import refresh_merchant_post_reviews
+                            await refresh_merchant_post_reviews(merchant_id)
+                        except Exception as _e:
+                            logger.warning(f"刷新帖子评价区失败: {_e}")
                         success_count += 1
                         logger.info(f"商户 {merchant_id} 帖子发布成功")
                     else:
@@ -428,6 +462,32 @@ class SchedulerWorker:
                     if update_success:
                         success_count += 1
                         logger.info(f"商户 {merchant_id}({merchant_name}) 状态已更新为expired")
+                        # 删除频道中的帖子（若记录了链接）
+                        try:
+                            row = await MerchantManager.get_merchant_by_id(merchant_id)
+                            post_url = row.get('post_url') if row else None
+                            if post_url:
+                                chat_id_val = None
+                                message_id_val = None
+                                try:
+                                    # 解析 https://t.me/c/<internal>/<mid> 或 https://t.me/<username>/<mid>
+                                    import re as _re
+                                    m = _re.search(r"https://t\.me/(c/([\d]+)/([\d]+)|([A-Za-z0-9_]+)/([\d]+))", str(post_url))
+                                    if m:
+                                        if m.group(2) and m.group(3):
+                                            chat_id_val = f"-100{m.group(2)}"
+                                            message_id_val = int(m.group(3))
+                                        elif m.group(4) and m.group(5):
+                                            chat_id_val = f"@{m.group(4)}"
+                                            message_id_val = int(m.group(5))
+                                except Exception:
+                                    chat_id_val = None
+                                    message_id_val = None
+                                if chat_id_val and message_id_val:
+                                    api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                                    async with aiohttp.ClientSession() as session:
+                                        async with session.post(api_url, json={'chat_id': chat_id_val, 'message_id': message_id_val}, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                                            _ = await resp.json()
                         
                         # 3. 可选：发送到期通知
                         # 这里可以根据系统配置决定是否发送通知

@@ -9,6 +9,8 @@ __pycache__/
 # Environments
 .env
 .env.*
+config/.env
+config/.env.*
 env/
 venv/
 .venv/

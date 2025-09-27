@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS merchants (
     channel_chat_id TEXT,                     -- 发布频道（用户名或ID）
     show_in_region_search INTEGER DEFAULT 0,
     publish_time DATETIME,
-    expiration_time DATETIME
+    expiration_time DATETIME,
+    post_url TEXT                             -- 最近一次发布的频道贴文链接（用于后续编辑/删除）
 );
 
 -- 订单表（V2.0统一字段名）

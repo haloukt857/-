@@ -111,7 +111,8 @@ async def render_channel_caption_md(
     pp_md_link = (
         f"[{_esc_md(ctx['pp_price'])}/pp]({ctx['link_price_pp']})" if ctx["link_price_pp"] else _esc_md(ctx["pp_price"] + "/pp")
     )
-    report_md = f"[{_esc_md('报告')}]({ctx['link_report']})" if ctx["link_report"] else _esc_md("报告")
+    # 取消深链：固定显示“评价”二字（不带机器人深链）
+    report_md = _esc_md("评价")
     adv_md = _esc_md(ctx["adv_text"])
 
     # 标签（MD）
@@ -123,15 +124,25 @@ async def render_channel_caption_md(
             tag_parts.append(_esc_md('#' + nm))
     tags_md = " ".join(tag_parts)
 
-    # 动态片段：优惠与评价（聚合成 MarkdownV2 文本）
+    # 动态片段：优惠与评价（同一行展示评价，不新起一行）
     offers = offers or []
     reviews = reviews or []
     offers_md = " ".join([_esc_md(o.get("text", "")) for o in offers if o.get("text")])
-    reviews_md = "\n".join([
-        f"• [{_esc_md(r.get('text','评价'))}]({_esc_html(r.get('url',''))})" if r.get("url") else f"• {_esc_md(r.get('text','评价'))}"
-        for r in reviews
-        if r
-    ])
+    # 评价样式：每行最多3个「评价X」，第一行带“✍️评价：”，后续行仅项目；无数据时为「评价」
+    review_segs: List[str] = []
+    for idx, r in enumerate([x for x in reviews if x]):
+        title = f"评价{idx+1}"
+        url = (r.get('url') or '').strip()
+        if url:
+            review_segs.append(f"「[{_esc_md(title)}]({url})」")
+        else:
+            review_segs.append(f"「{_esc_md(title)}」")
+    review_lines_md: List[str] = []
+    if review_segs:
+        for i in range(0, len(review_segs), 3):
+            review_lines_md.append(" ".join(review_segs[i:i+3]))
+    else:
+        review_lines_md = [f"{_esc_md('暂无')}"]
 
     # 统一代码控制样式（不走数据库模板）
     # 默认首行使用块引用，使频道内展示更突出
@@ -142,12 +153,15 @@ async def render_channel_caption_md(
         f"🌈地区：{district_md}",
         f"🎫课费：{p_md_link}      {pp_md_link}",
         f"🏷️标签：{tags_md}",
-        f"✍️评价：「{report_md}」",
     ]
-    if reviews_md:
-        body.append("")
-        body.append("📝评价：")
-        body.append(reviews_md)
+    if review_lines_md:
+        # 使用引用块使移动端对齐：首行仅标题，后续每行置于 blockquote 中
+        body.append("✍️评价：")
+        for ln in review_lines_md:
+            body.append(f"> {ln}")
+    else:
+        body.append("✍️评价：")
+        body.append("> 暂无")
     if offers_md:
         body.append("")
         body.append(f"🎉优惠：{offers_md}")
@@ -203,20 +217,31 @@ async def render_channel_caption_html(
     lines.append(f"<div class=\"line\">🌈地区：{district_html}</div>")
     lines.append(f"<div class=\"line\">🎫课费：{price_p_html} &nbsp;&nbsp;&nbsp; {price_pp_html}</div>")
     lines.append(f"<div class=\"line\">🏷️标签：{tags_html}</div>")
-    report_html = a_or_text("报告", ctx["link_report"])
-    lines.append(f"<div class=\"line\">✍️评价：「{report_html}」</div>")
+    # 单行显示「评价1」「评价2」...；无数据时展示「评价」纯文本
+    if reviews:
+        segs: List[str] = []
+        for idx, r in enumerate([x for x in reviews if x]):
+            title = f"评价{idx+1}"
+            url = (r.get("url") or "").strip()
+            if url.startswith("https://t.me/"):
+                segs.append(f"「<a href=\"{_esc_html(url)}\">{_esc_html(title)}</a>」")
+            else:
+                segs.append(f"「{_esc_html(title)}」")
+        # 首行标题，分组为引用块
+        lines.append("<div class=\"line\">✍️评价：</div>")
+        if segs:
+            i = 0
+            while i < len(segs):
+                lines.append(f"<blockquote class=\"tg-evals\">{' '.join(segs[i:i+3])}</blockquote>")
+                i += 3
+    else:
+        lines.append("<div class=\"line\">✍️评价：</div>")
+        lines.append("<blockquote class=\"tg-evals\">暂无</blockquote>")
 
     # 可选区块：评价与优惠（仅文本，避免外链）
     offers = offers or []
     reviews = reviews or []
-    if reviews:
-        lines.append("<div class=\"line\">📝评价：</div>")
-        for r in reviews:
-            if not r:
-                continue
-            txt = _esc_html(r.get("text", "评价"))
-            # 不生成外链（白名单仅允许 t.me 深链）
-            lines.append(f"<div class=\"line\">• {txt}</div>")
+    # 不再输出“📝评价：”新行
     if offers:
         offer_text = " ".join([_esc_html(o.get("text", "")) for o in offers if o.get("text")])
         if offer_text:

@@ -172,7 +172,7 @@ class MerchantManager:
                        m.profile_data, m.status, m.created_at, m.updated_at,
                        m.merchant_type, m.city_id, m.district_id, m.p_price, m.pp_price,
                        m.custom_description, m.adv_sentence, m.user_info, m.channel_link, m.channel_chat_id, m.show_in_region_search,
-                       m.publish_time, m.expiration_time,
+                       m.publish_time, m.expiration_time, m.post_url,
                        c.name as city_name, d.name as district_name
                 FROM merchants m
                 LEFT JOIN cities c ON m.city_id = c.id
@@ -216,6 +216,25 @@ class MerchantManager:
         return await MerchantManager.get_merchant(merchant_id)
 
     @staticmethod
+    async def set_post_url(merchant_id: int, url: str) -> bool:
+        """保存最近一次发布的频道贴文链接。
+
+        Args:
+            merchant_id: 商户ID
+            url: 帖子完整URL（https://t.me/.../<message_id>）
+
+        Returns:
+            bool: 是否更新成功
+        """
+        try:
+            sql = "UPDATE merchants SET post_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+            rc = await db_manager.execute_query(sql, (url, merchant_id))
+            return bool(rc and rc >= 0)
+        except Exception as e:
+            logger.error(f"更新商户帖子链接失败: merchant_id={merchant_id}, error={e}")
+            return False
+
+    @staticmethod
     async def get_merchant_by_chat_id(telegram_chat_id: int) -> Optional[Dict[str, Any]]:
         """
         根据Telegram聊天ID获取商户信息
@@ -232,7 +251,7 @@ class MerchantManager:
                        m.profile_data, m.status, m.created_at, m.updated_at,
                        m.merchant_type, m.city_id, m.district_id, m.p_price, m.pp_price,
                        m.custom_description, m.adv_sentence, m.user_info, m.channel_link, m.channel_chat_id, m.show_in_region_search,
-                       m.publish_time, m.expiration_time,
+                       m.publish_time, m.expiration_time, m.post_url,
                        c.name as city_name, d.name as district_name
                 FROM merchants m
                 LEFT JOIN cities c ON m.city_id = c.id

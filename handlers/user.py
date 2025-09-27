@@ -74,7 +74,8 @@ async def init_user_handler(bot):
 
 async def _render_channel_post_html(merchant: dict) -> str:
     """按频道统一模板渲染商户贴文（MarkdownV2）。
-    由于频道实际发布使用 MarkdownV2，为保持预览一致，这里也改用 MarkdownV2。
+    为与频道帖子完全同步，这里也聚合该商户的所有 U2M 评价链接，
+    以「评价1」「评价2」… 的形式渲染到“✍️评价：”行（每行最多3个）。
     """
     bot_u = (DEEPLINK_BOT_USERNAME or '').lstrip('@')
     mid = merchant.get('id')
@@ -88,9 +89,14 @@ async def _render_channel_post_html(merchant: dict) -> str:
     link_report = f"https://t.me/{bot_u}?start=report_{mid}" if bot_u and mid else ''
 
     from utils.caption_renderer import render_channel_caption_md
+    from database.db_reviews_u2m import u2m_reviews_manager
 
-    adv_text = (merchant.get('adv_sentence') or '').strip() if isinstance(merchant.get('adv_sentence'), str) else ''
-    return await render_channel_caption_md(merchant, bot_u)
+    # 聚合所有已确认且有效的 U2M 评价链接
+    reviews = await u2m_reviews_manager.list_by_merchant(int(mid), limit=1000, offset=0, admin_mode=False) if mid else []
+    urls = [str(r.get('report_post_url')).strip() for r in (reviews or []) if r and r.get('report_post_url')]
+    rev_payload = [{"text": f"评价{i+1}", "url": u} for i, u in enumerate(urls)]
+
+    return await render_channel_caption_md(merchant, bot_u, reviews=rev_payload)
 
 @router.callback_query(F.data == "profile")
 async def profile_callback_handler(callback: CallbackQuery):

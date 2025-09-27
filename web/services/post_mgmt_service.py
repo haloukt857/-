@@ -342,7 +342,15 @@ class PostMgmtService:
                                     async with session.post(api_url, json={'chat_id': channel_chat_id, 'media': media_payload}, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                                         data = await resp.json()
                                         sent_ok = bool(data.get('ok'))
-                                        if not sent_ok:
+                                        first_msg_id = None
+                                        if sent_ok:
+                                            try:
+                                                arr = data.get('result') or []
+                                                if isinstance(arr, list) and arr:
+                                                    first_msg_id = int(arr[0].get('message_id'))
+                                            except Exception:
+                                                first_msg_id = None
+                                        else:
                                             logger.error(f"发送媒体组失败: {data}")
                         else:
                             sent_ok = False
@@ -391,6 +399,29 @@ class PostMgmtService:
                 )
             
             if result:
+                # 如果是立即发布且成功，保存帖子链接并刷新“评价”区
+                if status == MERCHANT_STATUS.PUBLISHED.value and sent_ok:
+                    try:
+                        def _build_post_link(chat_id_val: str, message_id_val: int) -> Optional[str]:
+                            try:
+                                s = str(chat_id_val)
+                                if s.startswith('@'):
+                                    username = s.lstrip('@')
+                                    return f"https://t.me/{username}/{message_id_val}"
+                                if s.startswith('-100'):
+                                    internal = s[4:]
+                                    return f"https://t.me/c/{internal}/{message_id_val}"
+                                return f"https://t.me/{s}/{message_id_val}"
+                            except Exception:
+                                return None
+                        if 'first_msg_id' in locals() and first_msg_id:
+                            link = _build_post_link(str(channel_chat_id), int(first_msg_id))
+                            if link:
+                                await merchant_manager.set_post_url(merchant_id, link)
+                        from services.review_publish_service import refresh_merchant_post_reviews
+                        await refresh_merchant_post_reviews(merchant_id)
+                    except Exception as _e:
+                        logger.warning(f"保存帖子链接或刷新评价区失败: {_e}")
                 # 清除相关缓存
                 CacheService.clear_namespace(PostMgmtService.CACHE_NAMESPACE)
                 CacheService.clear_namespace("dashboard")

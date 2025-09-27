@@ -7,11 +7,12 @@
 """
 
 import logging
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple, List
 import json
 import html
 
 from aiogram import Bot
+import aiohttp
 
 from database.db_channels import posting_channels_db
 from database.db_reviews_u2m import u2m_reviews_manager
@@ -36,6 +37,26 @@ def _build_channel_post_link(channel_chat_id: str, message_id: int) -> Optional[
             return f"https://t.me/c/{internal}/{message_id}"
         # 其他字符串，尝试当做 username
         return f"https://t.me/{channel_chat_id}/{message_id}"
+    except Exception:
+        return None
+
+
+def _parse_channel_post_link(url: str) -> Optional[Tuple[str, int]]:
+    """解析频道贴文URL，返回 (chat_id, message_id)。
+    支持两种形式：
+    - https://t.me/c/<internal>/<message_id>  -> chat_id = -100<internal>
+    - https://t.me/<username>/<message_id>    -> chat_id = @username
+    """
+    try:
+        import re
+        m = re.search(r"https://t\.me/(c/([\d]+)/([\d]+)|([A-Za-z0-9_]+)/([\d]+))", str(url))
+        if not m:
+            return None
+        if m.group(2) and m.group(3):
+            return (f"-100{m.group(2)}", int(m.group(3)))
+        if m.group(4) and m.group(5):
+            return (f"@{m.group(4)}", int(m.group(5)))
+        return None
     except Exception:
         return None
 
@@ -149,25 +170,25 @@ class ReviewPublishService:
                 if link_district else f"📌 位置 {_esc(district_name)}"
             )
 
-            # 费用：展示 P 与 PP 两行（使用商户定价，携带城市上下文 deeplink）
-            fee_header = "✨ 费用"
-            p_price_val = merchant_obj.get('p_price') if merchant_obj else None
-            pp_price_val = merchant_obj.get('pp_price') if merchant_obj else None
-            p_price_str = str(p_price_val) if (p_price_val is not None and str(p_price_val) != '') else ''
-            pp_price_str = str(pp_price_val) if (pp_price_val is not None and str(pp_price_val) != '') else ''
-            line_p = (
-                f"  - P: <a href=\"https://t.me/{bot_u}?start=price_p_{p_price_str}{city_suffix}\">{_esc(p_price_str)}P</a>"
-                if (bot_u and p_price_str) else f"  - P: {_esc(p_price_str)}P"
-            )
-            line_pp = (
-                f"  - PP: <a href=\"https://t.me/{bot_u}?start=price_pp_{pp_price_str}{city_suffix}\">{_esc(pp_price_str)}PP</a>"
-                if (bot_u and pp_price_str) else f"  - PP: {_esc(pp_price_str)}PP"
-            )
+            # 费用：仅展示本订单课程与价格，带城市上下文 deeplink
+            ct = (order.get('course_type') or '').upper() if order else ''
+            price_val = order.get('price') if order else None
+            price_str = str(price_val) if (price_val is not None) else ''
+            fee_line = "✨ 费用"
+            if ct == 'P' and price_str:
+                link_price = f"https://t.me/{bot_u}?start=price_p_{price_str}{city_suffix}" if bot_u else ''
+                fee_disp = f"{_esc(price_str)}P"
+                fee_line = f"✨ 费用 <a href=\"{link_price}\">{fee_disp}</a>" if link_price else f"✨ 费用 {fee_disp}"
+            elif ct == 'PP' and price_str:
+                link_price = f"https://t.me/{bot_u}?start=price_pp_{price_str}{city_suffix}" if bot_u else ''
+                fee_disp = f"{_esc(price_str)}PP"
+                fee_line = f"✨ 费用 <a href=\"{link_price}\">{fee_disp}</a>" if link_price else f"✨ 费用 {fee_disp}"
 
-            # 文字详情（同一行展示）
-            detail_line = None
+            # 文字详情：标题单独一行，正文从下一行开始
+            detail_header = "📜 文字详情："
+            details_body = None
             if review.get('text_review_by_user'):
-                detail_line = f"📜 文字详情： {_esc(review.get('text_review_by_user'))}"
+                details_body = _esc(review.get('text_review_by_user'))
 
             # 留名与时间（同一行）
             from datetime import datetime
@@ -196,17 +217,23 @@ class ReviewPublishService:
                 "</pre>"
             )
 
-            # 组装：费用两行 → 空行 → 评分区；其后文字详情与留名
-            header_lines = [report_line, name_line, loc_line, fee_header, line_p, line_pp, "", rating_head]
-            text = "\n".join(header_lines) + "\n" + rating_block + "\n"
-            if detail_line:
-                text += detail_line + "\n\n"
+            # 组装：单行费用 → 空行 → 评分区；其后文字详情与留名
+            header_lines = [report_line, name_line, loc_line, fee_line, "", rating_head]
+            text = "\n".join(header_lines) + "\n" + rating_block + "\n\n"
+            if details_body:
+                text += detail_header + "\n" + details_body + "\n\n"
             text += footer_line + "\n\n"
 
             chat_id = channel.get('channel_chat_id')
             sent = await bot.send_message(chat_id, text, parse_mode='HTML')
             link = _build_channel_post_link(str(chat_id), sent.message_id)
             await u2m_reviews_manager.set_report_meta(review_id, message_id=sent.message_id, url=link, published_at=sent.date)
+            # 发布成功后，刷新商户主帖的“评价”区（累积所有U2M链接）
+            if mid:
+                try:
+                    await refresh_merchant_post_reviews(int(mid))
+                except Exception:
+                    pass
             return True
         except Exception as e:
             logger.error(f"publish_u2m failed: {e}")
@@ -329,3 +356,57 @@ class ReviewPublishService:
 
 
 review_publish_service = ReviewPublishService()
+
+
+async def refresh_merchant_post_reviews(merchant_id: int) -> bool:
+    """刷新商户帖子caption中的“评价”区，拼接所有U2M评价链接。
+
+    约束：
+    - 不兜底，caption 超长或调用失败将直接返回 False，不做重试。
+    - 仅当商户状态为 published 且存在 post_url 时执行。
+    """
+    try:
+        from database.db_merchants import MerchantManager
+        from config import DEEPLINK_BOT_USERNAME, BOT_TOKEN
+        from utils.caption_renderer import render_channel_caption_md
+
+        merchant = await MerchantManager.get_merchant_by_id(merchant_id)
+        if not merchant:
+            return False
+        if str(merchant.get('status')) != 'published':
+            return False
+        post_url = (merchant.get('post_url') or '').strip()
+        if not post_url:
+            return False
+
+        # 取所有已确认的 U2M 评价，并收集频道URL
+        reviews: List[Dict] = await u2m_reviews_manager.list_by_merchant(merchant_id, limit=1000, offset=0, admin_mode=False)
+        urls = [str(r.get('report_post_url')).strip() for r in (reviews or []) if r and r.get('report_post_url')]
+
+        # 组装“评价1/评价2/...”
+        rev_payload = [{"text": f"评价{i+1}", "url": u} for i, u in enumerate(urls)]
+        bot_u = (DEEPLINK_BOT_USERNAME or '').lstrip('@')
+        caption = await render_channel_caption_md(merchant, bot_u, reviews=rev_payload)
+
+        parsed = _parse_channel_post_link(post_url)
+        if not parsed:
+            return False
+        chat_id_val, message_id_val = parsed
+
+        api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageCaption"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                api_url,
+                json={
+                    'chat_id': chat_id_val,
+                    'message_id': int(message_id_val),
+                    'caption': caption,
+                    'parse_mode': 'MarkdownV2'
+                },
+                timeout=aiohttp.ClientTimeout(total=20)
+            ) as resp:
+                data = await resp.json()
+                return bool(data.get('ok'))
+    except Exception as e:
+        logger.error(f"refresh_merchant_post_reviews failed: {e}")
+        return False
