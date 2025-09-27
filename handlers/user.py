@@ -546,7 +546,6 @@ async def profile_command(message: Message, override_user=None):
         name = merchant.get('name') or (user_ctx.full_name or '-')
         p_price = merchant.get('p_price') or '-'
         pp_price = merchant.get('pp_price') or '-'
-        desc = merchant.get('custom_description') or '-'
         channel = merchant.get('channel_chat_id') or '-'
 
         # 地区名称
@@ -572,7 +571,6 @@ async def profile_command(message: Message, override_user=None):
             'name': name,
             'p_price': p_price,
             'pp_price': pp_price,
-            'custom_description': desc,
             'city_name': city_name,
             'district_name': district_name,
             'channel_chat_id': channel,
@@ -613,7 +611,7 @@ async def profile_command(message: Message, override_user=None):
              InlineKeyboardButton(text="修改关键词", callback_data="merchant_edit_keywords")],
             [InlineKeyboardButton(text=f"P价格：{_short(p_price, 10)}", callback_data="merchant_edit_p"),
              InlineKeyboardButton(text=f"PP价格：{_short(pp_price, 10)}", callback_data="merchant_edit_pp")],
-            [InlineKeyboardButton(text="修改描述", callback_data="merchant_edit_desc"),
+            [InlineKeyboardButton(text="修改一句话优势", callback_data="merchant_edit_desc"),
              InlineKeyboardButton(text=channel_label, callback_data="merchant_edit_channel")],
             [InlineKeyboardButton(text=f"联系方式：{_short(merchant.get('contact_info') or '-', 16)}", callback_data="merchant_edit_contact")],
             [InlineKeyboardButton(text=f"发布时间：{_short(pub_disp, 16)}", callback_data="merchant_edit_publish_time")],

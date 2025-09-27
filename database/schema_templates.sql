@@ -47,7 +47,7 @@ INSERT OR IGNORE INTO templates (key, content) VALUES
 📍 **地区**: {province} - {region}
 💰 **价格**: P{p_price} | PP{pp_price}
 
-📝 **介绍**: {custom_description}
+📝 **一句话优势**: {adv_sentence}
 
 🏷️ **特色标签**: {keywords}
 
@@ -156,17 +156,15 @@ INSERT OR IGNORE INTO templates (key, content) VALUES
 • 这将作为您的高级服务定价
 • 通常PP价格高于P价格'),
 
-('custom_description_input', '📝 **步骤 6/7: 自定义描述**
+('adv_sentence_input', '📝 **步骤 6/7: 一句话优势**
 
-请输入您的商户自定义描述：
+请输入你的一句话优势（建议≤30字）：
 
-💡 **描述建议：**
-• 介绍您的主要服务和特色
-• 可以包含联系方式或营业时间
-• 不超过200个字符
-• 这将显示在您的商户信息中
-
-发送您的描述内容，或发送"跳过"使用默认描述。'),
+💡 **填写建议：**
+• 用简短话语突出核心优势
+• 避免长段落与联系方式
+• 不超过30字
+• 将在频道贴文首行展示'),
 
 ('keyword_selection', '🏷️ **步骤 7/7: 选择关键词**
 
@@ -188,7 +186,7 @@ INSERT OR IGNORE INTO templates (key, content) VALUES
 📍 **地区**: {province} - {region}
 💰 **P价格**: ¥{p_price}
 💎 **PP价格**: ¥{pp_price}
-📝 **描述**: {description}
+📝 **一句话优势**: {adv_sentence}
 🏷️ **关键词**: {keywords}
 
 🔍 **用户检测结果**: {user_analysis}

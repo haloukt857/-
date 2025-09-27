@@ -5,6 +5,7 @@
 """
 
 import logging
+from datetime import datetime, timedelta
 from fasthtml.common import *
 from config import DEEPLINK_BOT_USERNAME
 from starlette.requests import Request
@@ -22,6 +23,41 @@ from utils.caption_renderer import render_channel_caption_md, render_channel_cap
 from starlette.responses import HTMLResponse
 
 logger = logging.getLogger(__name__)
+
+# 时间格式化工具：统一展示/输入
+def _fmt_dt_display(value) -> str:
+    try:
+        if not value:
+            return '未设置'
+        if isinstance(value, str):
+            s = value.strip().replace('T', ' ')
+            if '.' in s:
+                s = s.split('.', 1)[0]
+            return s[:16] if len(s) >= 16 else s
+        # datetime
+        from datetime import datetime as _dt
+        if isinstance(value, _dt):
+            return value.strftime('%Y-%m-%d %H:%M')
+        return str(value)
+    except Exception:
+        return '未设置'
+
+def _fmt_dt_input(value) -> str:
+    """转为 datetime-local 需要的 YYYY-MM-DDTHH:MM。"""
+    try:
+        if not value:
+            return ''
+        if isinstance(value, str):
+            s = value.strip().replace(' ', 'T')
+            if '.' in s:
+                s = s.split('.', 1)[0]
+            return s[:16]
+        from datetime import datetime as _dt
+        if isinstance(value, _dt):
+            return value.strftime('%Y-%m-%dT%H:%M')
+        return ''
+    except Exception:
+        return ''
 
 # 帖子状态显示映射
 POST_STATUS_DISPLAY_MAP = {
@@ -266,7 +302,7 @@ async def posts_list(request: Request):
                             )
                         ),
                         Td(post.get('publish_time', '未设置'), cls="whitespace-nowrap text-xs px-2 py-1"),
-                        Td(post.get('expiration_time', '未设置'), cls="whitespace-nowrap text-xs px-2 py-1"),
+                        Td(_fmt_dt_display(post.get('expiration_time')), cls="whitespace-nowrap text-xs px-2 py-1"),
                         Td(post.get('created_at', ''), cls="whitespace-nowrap text-xs px-2 py-1"),
                         Td(
                             Div(
@@ -480,8 +516,8 @@ async def post_detail(request: Request, post_id: int):
                         Input(value=f"https://t.me/{DEEPLINK_BOT_USERNAME}?start=m_{post_id}", readonly=True, id=dl_input_id, cls="input input-bordered w-full mt-2"),
                         Button("复制", type="button", id=dl_btn_id, cls="btn btn-ghost btn-xs mt-2"),
                     ),
-                    Li(Strong("发布时间："), Span(post.get('publish_time', '未设置'))),
-                    Li(Strong("到期时间："), Span(post.get('expiration_time', '未设置'))),
+                    Li(Strong("发布时间："), Span(_fmt_dt_display(post.get('publish_time')))),
+                    Li(Strong("到期时间："), Span(_fmt_dt_display(post.get('expiration_time')))),
                     cls="space-y-2"
                 ),
                 cls="card bg-base-100 shadow p-6"
@@ -801,14 +837,20 @@ async def post_detail(request: Request, post_id: int):
                         ),
                         Div(
                             Label("发布时间", cls="label"),
-                            Input(name="publish_time", value=post.get('publish_time', ''), 
-                                 type="datetime-local", cls="input input-bordered w-full"),
+                            Input(
+                                name="publish_time",
+                                value=_fmt_dt_input(post.get('publish_time')),
+                                type="datetime-local", cls="input input-bordered w-full"
+                            ),
                             cls="form-control"
                         ),
                         Div(
                             Label("到期时间", cls="label"),
-                            Input(name="expiration_time", value=post.get('expiration_time', ''), 
-                                 type="datetime-local", cls="input input-bordered w-full"),
+                            Input(
+                                name="expiration_time",
+                                value=_fmt_dt_input(post.get('expiration_time')),
+                                type="datetime-local", cls="input input-bordered w-full"
+                            ),
                             cls="form-control"
                         ),
                         cls="grid grid-cols-1 md:grid-cols-3 gap-4"
@@ -1104,6 +1146,27 @@ async def post_update(request: Request, post_id: int):
         except Exception:
             pass
 
+        # 过期时间规范化：管理员输入任何时间，统一归一为“所选日期的次日 00:00”
+        exp_raw = (form_data.get('expiration_time') or '').strip()
+        exp_norm = None
+        if exp_raw:
+            try:
+                s = exp_raw.replace('T', ' ')
+                dt = None
+                try:
+                    dt = datetime.fromisoformat(s)
+                except Exception:
+                    try:
+                        dt = datetime.strptime(s[:10], '%Y-%m-%d')
+                    except Exception:
+                        dt = None
+                if dt:
+                    base_midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                    exp_dt = base_midnight + timedelta(days=1)
+                    exp_norm = exp_dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                exp_norm = None
+
         # 构建更新数据（与 merchants 表字段一致）
         update_data = {
             'name': form_data.get('name') or None,
@@ -1117,7 +1180,7 @@ async def post_update(request: Request, post_id: int):
             'city_id': to_int(form_data.get('city_id')),
             'district_id': to_int(form_data.get('district_id')),
             'publish_time': form_data.get('publish_time') or None,
-            'expiration_time': form_data.get('expiration_time') or None
+            'expiration_time': exp_norm
         }
         # 校验优势必填与长度
         if not update_data['adv_sentence']:

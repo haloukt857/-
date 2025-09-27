@@ -73,12 +73,19 @@ class BindingCodesManager:
                     get_id_query = "SELECT id, created_at FROM binding_codes WHERE code = ?"
                     result = await db_manager.fetch_one(get_id_query, (code,))
                     
+                    # 展示用时间字符串（不影响DB已写入的expires_at）
+                    disp_expires = None
+                    try:
+                        disp_expires = expires_at.strftime('%Y-%m-%d %H:%M') if expires_at else None
+                    except Exception:
+                        disp_expires = expires_at.isoformat() if expires_at else None
+
                     code_info = {
                         'id': result['id'] if result else None,
                         'code': code,
                         'is_used': False,
-                        'created_at': result['created_at'] if result else datetime.now().isoformat(),
-                        'expires_at': expires_at.isoformat() if expires_at else None,
+                        'created_at': (result['created_at'] if result else datetime.now()).strftime('%Y-%m-%d %H:%M:%S') if result and isinstance(result['created_at'], datetime) else (result['created_at'] if result else datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                        'expires_at': disp_expires,
                         'used_at': None,
                         'merchant_id': None,
                         'plan_days': plan_days,
@@ -236,6 +243,31 @@ class BindingCodesManager:
         except Exception as e:
             logger.error(f"获取绑定码列表失败: {e}")
             raise
+
+    @staticmethod
+    async def get_last_used_plan_days(merchant_id: int) -> Optional[int]:
+        """获取该商户最近一次已使用绑定码的 plan_days（>0 返回整数，否则返回None）。"""
+        try:
+            query = """
+                SELECT plan_days
+                FROM binding_codes
+                WHERE merchant_id = ? AND is_used = TRUE AND plan_days IS NOT NULL
+                ORDER BY COALESCE(used_at, created_at) DESC
+                LIMIT 1
+            """
+            row = await db_manager.fetch_one(query, (merchant_id,))
+            if not row:
+                return None
+            # 兼容 dict/tuple 两种返回
+            val = row[0] if not isinstance(row, dict) else row.get('plan_days')
+            try:
+                iv = int(val) if val is not None else None
+                return iv if iv and iv > 0 else None
+            except Exception:
+                return None
+        except Exception as e:
+            logger.error(f"获取最近 plan_days 失败: {e}")
+            return None
 
     @staticmethod
     async def get_binding_code_statistics() -> Dict[str, Any]:

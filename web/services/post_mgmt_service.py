@@ -264,8 +264,26 @@ class PostMgmtService:
             # 默认时间处理：立即发布/设为过期时补充时间戳
             if status == MERCHANT_STATUS.PUBLISHED.value and publish_time is None:
                 publish_time = datetime.now()
+            # 统一到分钟粒度（秒和微秒清零）
+            if status == MERCHANT_STATUS.PUBLISHED.value and isinstance(publish_time, datetime):
+                publish_time = publish_time.replace(second=0, microsecond=0)
             if status == MERCHANT_STATUS.EXPIRED.value and expire_time is None:
                 expire_time = datetime.now()
+            # 管理员传入的过期时间统一规范为“所选日期的次日 00:00”
+            try:
+                if expire_time is not None:
+                    if isinstance(expire_time, str):
+                        try:
+                            _et = datetime.fromisoformat(expire_time.replace('T', ' '))
+                        except Exception:
+                            _et = None
+                    else:
+                        _et = expire_time
+                    if isinstance(_et, datetime):
+                        base_midnight = _et.replace(hour=0, minute=0, second=0, microsecond=0)
+                        expire_time = base_midnight + timedelta(days=1)
+            except Exception:
+                pass
             
             # 如为“立即发布”，尝试直接发布到当前频道
             sent_ok = True
@@ -388,7 +406,9 @@ class PostMgmtService:
                         try:
                             plan_days = await BindingCodesDatabase.get_last_used_plan_days(merchant_id)
                             if plan_days and plan_days > 0:
-                                expire_time = publish_time + timedelta(days=int(plan_days))
+                                # 规则：过期时间按日期计算，设置为“发布日00:00 + plan_days天”
+                                base_midnight = publish_time.replace(hour=0, minute=0, second=0, microsecond=0)
+                                expire_time = base_midnight + timedelta(days=int(plan_days))
                         except Exception:
                             pass
 
@@ -541,11 +561,20 @@ class PostMgmtService:
                 return {'success': False, 'error': '帖子不存在'}
             
             # 计算新的过期时间
-            current_expire_time = merchant.get('expire_time')
-            if current_expire_time:
-                new_expire_time = current_expire_time + timedelta(days=extend_days)
+            # 使用按日期的过期规则：基于“当前过期日的00:00”或“今天00:00”，再加天数
+            current_expire_time = merchant.get('expiration_time')
+            if isinstance(current_expire_time, str):
+                try:
+                    current_expire_time = datetime.fromisoformat(current_expire_time)
+                except Exception:
+                    current_expire_time = None
+            base_midnight = None
+            if isinstance(current_expire_time, datetime):
+                base_midnight = current_expire_time.replace(hour=0, minute=0, second=0, microsecond=0)
             else:
-                new_expire_time = datetime.now() + timedelta(days=extend_days)
+                now = datetime.now()
+                base_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            new_expire_time = base_midnight + timedelta(days=int(extend_days))
             
             result = await merchant_manager.update_merchant_status(
                 merchant_id,

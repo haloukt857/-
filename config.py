@@ -124,7 +124,7 @@ MESSAGE_TEMPLATES = {
 老师名称：{name}
 地区：{province} - {region}
 价格：P{p_price} | PP{pp_price}
-介绍：{custom_description}
+一句话优势：{adv_sentence}
 特点：{keywords}
     """,
     
@@ -227,18 +227,16 @@ MESSAGE_TEMPLATES = {
 • 通常PP价格高于P价格
     """,
     
-    "custom_description_input": """
-📝 步骤 6/7: 自定义描述
+    "adv_sentence_input": """
+📝 步骤 6/7: 一句话优势
 
-请输入您的商户自定义描述：
+请输入你的一句话优势（建议≤30字）：
 
-💡 描述建议：
-• 介绍您的主要服务和特色
-• 可以包含联系方式或营业时间
-• 不超过200个字符
-• 这将显示在您的商户信息中
-
-发送您的描述内容，或发送"跳过"使用默认描述。
+💡 填写建议：
+• 用简短话语突出核心优势
+• 避免长段落与联系方式
+• 不超过30字
+• 将在频道贴文首行展示
     """,
     
     "keyword_selection": """
@@ -264,7 +262,7 @@ MESSAGE_TEMPLATES = {
 📍 地区: {province} - {region}
 💰 P价格: ¥{p_price}
 💎 PP价格: ¥{pp_price}
-📝 描述: {description}
+📝 一句话优势: {adv_sentence}
 🏷️ 关键词: {keywords}
 
 🔍 用户检测结果: {user_analysis}
@@ -281,7 +279,7 @@ MESSAGE_TEMPLATES = {
 👤 类型: {merchant_type}
 📍 地区: {province} - {region}
 💰 价格: P¥{p_price} / PP¥{pp_price}
-📝 描述: {description}
+📝 一句话优势: {adv_sentence}
 🏷️ 关键词: {keywords}
 
 🚀 接下来您可以:
@@ -304,15 +302,13 @@ MESSAGE_TEMPLATES = {
 请重新输入：
     """,
     
-    "description_too_long": """
-❌ 描述过长
-
-您输入的描述超过了200个字符限制。
+    "adv_sentence_too_long": """
+❌ 一句话优势过长
 
 当前长度：{current_length} 字符
-最大长度：200 字符
+限制长度：30 字
 
-请重新输入一个较短的描述：
+请重新输入更精炼的优势描述：
     """,
     
     "bot_detection_warning": """

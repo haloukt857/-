@@ -19,6 +19,27 @@ from database.db_binding_codes import binding_codes_manager
 logger = logging.getLogger(__name__)
 
 
+def _fmt_ts(value) -> str:
+    """将数据库/ISO字符串的时间统一格式化为 'YYYY-MM-DD HH:MM'."""
+    try:
+        if not value:
+            return ''
+        if isinstance(value, datetime):
+            return value.strftime('%Y-%m-%d %H:%M')
+        s = str(value).strip()
+        if 'T' in s:
+            s = s.replace('T', ' ')
+        # 丢弃小数秒
+        if '.' in s:
+            s = s.split('.', 1)[0]
+        # 仅保留到分钟
+        if len(s) >= 16:
+            return s[:16]
+        return s
+    except Exception:
+        return str(value or '')
+
+
 @require_auth
 async def binding_codes_list(request: Request):
     """绑定码列表页面"""
@@ -72,7 +93,7 @@ async def binding_codes_list(request: Request):
             
             expires_info = "永久有效"
             if code.get('expires_at'):
-                expires_info = code.get('expires_at')
+                expires_info = _fmt_ts(code.get('expires_at')) or "永久有效"
             
             actions = Div(
                 A("详情", href=f"/binding-codes/{code['code']}/detail", 
@@ -406,7 +427,7 @@ async def binding_codes_generate_action(request: Request):
             *[
                 Div(
                     Div(code['code'], cls="font-mono text-lg font-bold"),
-                    Div(f"过期时间: {code.get('expires_at', '永不过期')}", 
+                    Div(f"过期时间: {_fmt_ts(code.get('expires_at')) or '永不过期'}", 
                         cls="text-sm text-gray-500"),
                     cls="bg-base-200 p-3 rounded mb-2"
                 )
@@ -509,7 +530,7 @@ async def binding_code_detail(request: Request):
                     ),
                     Div(
                         Div("过期时间", cls="font-semibold"),
-                        Div(code_info.get('expires_at', '永久有效')),
+                        Div(_fmt_ts(code_info.get('expires_at')) or '永久有效'),
                         cls="flex justify-between items-center py-2"
                     ),
                     cls="divide-y divide-base-300"
@@ -616,7 +637,7 @@ async def binding_codes_export(request: Request):
                 code.get('merchant_id', ''),
                 code.get('merchant_name', ''),
                 code.get('created_at', ''),
-                code.get('expires_at', ''),
+                _fmt_ts(code.get('expires_at')),
                 code.get('used_at', ''),
                 code.get('bound_telegram_username', ''),
                 code.get('bound_telegram_name', '')

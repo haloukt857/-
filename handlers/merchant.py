@@ -161,10 +161,10 @@ BINDING_FLOW_STEPS = {
         "field": "pp_price"
     },
     6: {
-        "title": "📝 步骤 6/8: 服务描述",
-        "description": "请输入您的服务描述：",
+        "title": "📝 步骤 6/8: 一句话优势",
+        "description": "请输入你的一句话优势（建议≤30字）：",
         "input_type": "text",
-        "field": "custom_description"
+        "field": "adv_sentence"
     },
     7: {
         "title": "📢 步骤 7/8: 发布频道用户名",
@@ -424,7 +424,7 @@ class MerchantHandler:
             3: "🌆 选择地区",
             4: "💰 输入P价格",
             5: "💎 输入PP价格",
-            6: "📝 服务描述",
+            6: "📝 一句话优势",
             7: "📢 频道用户名",
             8: "🏷️ 选择关键词",
             9: "🗓️ 选择发布时间",
@@ -435,7 +435,7 @@ class MerchantHandler:
             filled = False
             if field == 'keywords':
                 filled = bool(user_choices.get(field))
-            elif field in ("p_price", "pp_price", "custom_description", "merchant_type", "city", "district"):
+            elif field in ("p_price", "pp_price", "custom_description", "adv_sentence", "merchant_type", "city", "district"):
                 filled = str(user_choices.get(field, "")).strip() != ""
             elif field == 'publish_time_str':
                 filled = bool(user_choices.get('publish_date') and user_choices.get('publish_time_str'))
@@ -699,7 +699,6 @@ async def show_profile_panel_like_user(message: Message, user_id: int, state: FS
         name = merchant.get('name') or (message.from_user.full_name or '-')
         p_price = merchant.get('p_price') or '-'
         pp_price = merchant.get('pp_price') or '-'
-        desc = merchant.get('custom_description') or '-'
         channel = merchant.get('channel_chat_id') or '-'
 
         city_name = '-'
@@ -723,7 +722,6 @@ async def show_profile_panel_like_user(message: Message, user_id: int, state: FS
             'name': name,
             'p_price': p_price,
             'pp_price': pp_price,
-            'custom_description': desc,
             'city_name': city_name,
             'district_name': district_name,
             'channel_chat_id': channel,
@@ -766,7 +764,7 @@ async def show_profile_panel_like_user(message: Message, user_id: int, state: FS
              InlineKeyboardButton(text="修改关键词", callback_data="merchant_edit_keywords")],
             [InlineKeyboardButton(text=f"P价格：{_short(p_price, 10)}", callback_data="merchant_edit_p"),
              InlineKeyboardButton(text=f"PP价格：{_short(pp_price, 10)}", callback_data="merchant_edit_pp")],
-            [InlineKeyboardButton(text="修改描述", callback_data="merchant_edit_desc"),
+            [InlineKeyboardButton(text="修改一句话优势", callback_data="merchant_edit_desc"),
              InlineKeyboardButton(text=channel_label, callback_data="merchant_edit_channel")],
             [InlineKeyboardButton(text=f"联系方式：{_short(merchant.get('contact_info') or '-', 16)}", callback_data="merchant_edit_contact")],
             [InlineKeyboardButton(text=f"发布时间：{_short(pub_disp, 16)}", callback_data="merchant_edit_publish_time")],
@@ -1147,8 +1145,9 @@ async def merchant_edit_pp(callback: CallbackQuery, state: FSMContext):
 async def merchant_edit_desc(callback: CallbackQuery, state: FSMContext):
     try:
         await state.update_data(editing_mode="profile")
-        await state.set_state(MerchantStates.entering_custom_description)
-        m = await callback.message.answer("请输入新的服务描述（不超过200字）：", parse_mode=None)
+        # 将“修改描述”入口替换为编辑“一句话优势”
+        await state.set_state(MerchantStates.entering_adv_sentence)
+        m = await callback.message.answer("请输入新的优势一句话（建议≤30字）：", parse_mode=None)
         await _push_prompt_message(state, m.message_id)
         await callback.answer()
     except Exception as e:
@@ -1434,7 +1433,7 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                 f"Telegram 用户名：{tg_username}\n"
                 f"联系方式：{contact_info}\n"
                 f"价格：P {user_choices.get('p_price', '未填写')} | PP {user_choices.get('pp_price', '未填写')}\n"
-                f"服务描述：{user_choices.get('custom_description', '无')}\n"
+                f"一句话优势：{user_choices.get('adv_sentence', '无')}\n"
                 f"关键词：{keywords_text}\n"
                 f"发布时间：{pub_preview}"
             )
@@ -1595,7 +1594,7 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                 f"联系方式: {contact_info}",
                 f"P价格: {user_choices.get('p_price', '-')}",
                 f"PP价格: {user_choices.get('pp_price', '-')}",
-                f"描述: {user_choices.get('custom_description', '-')}",
+                f"优势: {user_choices.get('adv_sentence', '-')}",
                 f"关键词: {keywords_text}",
                 f"发布时间: {pub_text}"
             ])
@@ -1749,6 +1748,8 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                                 await state.set_state(MerchantStates.entering_pp_price)
                             elif fsm_field == "custom_description":
                                 await state.set_state(MerchantStates.entering_custom_description)
+                            elif fsm_field == "adv_sentence":
+                                await state.set_state(MerchantStates.entering_adv_sentence)
                             elif fsm_field == "channel_username":
                                 await state.set_state(MerchantStates.entering_channel_username)
                         elif next_step == 9:
@@ -1946,6 +1947,8 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                                     await state.set_state(MerchantStates.entering_pp_price)
                                 elif fsm_field == "custom_description":
                                     await state.set_state(MerchantStates.entering_custom_description)
+                                elif fsm_field == "adv_sentence":
+                                    await state.set_state(MerchantStates.entering_adv_sentence)
                                 elif fsm_field == "channel_username":
                                     await state.set_state(MerchantStates.entering_channel_username)
 
@@ -2102,7 +2105,42 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
             await _finalize_and_back_to_menu(state, message.bot, message.chat.id, message, user_id)
             return
 
-        # 旧的“优势一句话”确认步骤移除：按新流程不再单独询问
+        if current_state == MerchantStates.entering_adv_sentence:
+            # 一句话优势：记录后给出确认继续按钮（与第7步衔接）
+            user_choices["adv_sentence"] = text
+            await state.update_data(user_choices=user_choices)
+            await fsm_db.save_user_state(
+                user_id,
+                merchant_handler.flow_state_name,
+                {"user_choices": user_choices, "current_step": 6}
+            )
+            # 实时写入草稿
+            try:
+                await merchant_handler._update_merchant_draft(user_id, {'adv_sentence': text})
+            except Exception:
+                pass
+            # 若来自“我的资料”编辑模式：直接保存并返回面板
+            if (await state.get_data()).get("editing_mode") == "profile":
+                try:
+                    merchant = await MerchantManager.get_merchant_by_chat_id(user_id)
+                    if merchant:
+                        await MerchantManager.update_merchant(merchant['id'], {'adv_sentence': text})
+                except Exception:
+                    pass
+                await _clear_prompt_messages(state, message.bot, message.chat.id)
+                await state.clear()
+                try:
+                    await show_profile_panel_like_user(message, user_id, state)
+                except Exception:
+                    pass
+                return
+
+            # 非编辑场景：提示“确认并继续”进入步骤7
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="确认并继续", callback_data="binding_confirm_step7")]
+            ])
+            await message.answer(f"已记录优势：{text}\n请点击“确认并继续”进入下一步。", reply_markup=kb, parse_mode=None)
+            return
 
         if current_state == MerchantStates.entering_channel_username:
             # 频道用户名输入标准化：支持 @username / username / https://t.me/username

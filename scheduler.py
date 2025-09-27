@@ -16,7 +16,7 @@ import asyncio
 import logging
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List
 
 # 添加项目根目录到Python路径
@@ -181,7 +181,7 @@ class SchedulerWorker:
             # 1. 查询符合发布条件的帖子（基于结构化地区字段）
             query = """
                 SELECT m.id, m.telegram_chat_id, m.name, m.merchant_type,
-                       m.p_price, m.pp_price, m.custom_description, m.adv_sentence, m.publish_time,
+                       m.p_price, m.pp_price, m.adv_sentence, m.publish_time,
                        m.channel_chat_id, m.channel_link,
                        m.city_id, m.district_id,
                        c.name AS city_name, d.name AS district_name
@@ -285,8 +285,28 @@ class SchedulerWorker:
                         logger.error(f"调用Telegram发送失败: {send_e}")
 
                     # 3. 更新帖子状态为'published'
+                    # 计算过期时间（按绑定码计划天数），精确到分钟
+                    expire_time_calc = None
+                    publish_time_value = post.get('publish_time')
+                    try:
+                        if isinstance(publish_time_value, str) and len(publish_time_value) >= 16:
+                            ptime = datetime.fromisoformat(publish_time_value[:16] + (':00' if len(publish_time_value) == 16 else publish_time_value[16:]))
+                        elif isinstance(publish_time_value, datetime):
+                            ptime = publish_time_value
+                        else:
+                            ptime = current_time
+                        ptime = ptime.replace(second=0, microsecond=0)
+                        from database.db_binding_codes import BindingCodesDatabase
+                        pdays = await BindingCodesDatabase.get_last_used_plan_days(merchant_id)
+                        if pdays and pdays > 0:
+                            # 规则：到期按日期计算，截止到“次日00:00”。
+                            base_midnight = ptime.replace(hour=0, minute=0, second=0, microsecond=0)
+                            expire_time_calc = base_midnight + timedelta(days=int(pdays))
+                    except Exception:
+                        expire_time_calc = None
+
                     update_success = await MerchantManager.update_merchant_status(
-                        merchant_id, 'published'
+                        merchant_id, 'published', ptime if 'ptime' in locals() else None, expire_time_calc
                     ) if sent_ok else False
                     
                     if update_success and sent_ok:
