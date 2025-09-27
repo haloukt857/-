@@ -128,10 +128,10 @@ async def render_channel_caption_md(
     offers = offers or []
     reviews = reviews or []
     offers_md = " ".join([_esc_md(o.get("text", "")) for o in offers if o.get("text")])
-    # 评价样式：每行最多3个「评价X」，第一行带“✍️评价：”，后续行仅项目；无数据时为「评价」
+    # 评价样式：每行最多4个「评价XX」，第一行带“✍️评价：”，后续行仅项目；无数据时显示“暂无”
     review_segs: List[str] = []
     for idx, r in enumerate([x for x in reviews if x]):
-        title = f"评价{idx+1}"
+        title = f"评价{idx+1:02d}"
         url = (r.get('url') or '').strip()
         if url:
             review_segs.append(f"「[{_esc_md(title)}]({url})」")
@@ -139,8 +139,8 @@ async def render_channel_caption_md(
             review_segs.append(f"「{_esc_md(title)}」")
     review_lines_md: List[str] = []
     if review_segs:
-        for i in range(0, len(review_segs), 3):
-            review_lines_md.append(" ".join(review_segs[i:i+3]))
+        for i in range(0, len(review_segs), 4):
+            review_lines_md.append(" ".join(review_segs[i:i+4]))
     else:
         review_lines_md = [f"{_esc_md('暂无')}"]
 
@@ -221,7 +221,7 @@ async def render_channel_caption_html(
     if reviews:
         segs: List[str] = []
         for idx, r in enumerate([x for x in reviews if x]):
-            title = f"评价{idx+1}"
+            title = f"评价{idx+1:02d}"
             url = (r.get("url") or "").strip()
             if url.startswith("https://t.me/"):
                 segs.append(f"「<a href=\"{_esc_html(url)}\">{_esc_html(title)}</a>」")
@@ -232,8 +232,8 @@ async def render_channel_caption_html(
         if segs:
             i = 0
             while i < len(segs):
-                lines.append(f"<blockquote class=\"tg-evals\">{' '.join(segs[i:i+3])}</blockquote>")
-                i += 3
+                lines.append(f"<blockquote class=\"tg-evals\">{' '.join(segs[i:i+4])}</blockquote>")
+                i += 4
     else:
         lines.append("<div class=\"line\">✍️评价：</div>")
         lines.append("<blockquote class=\"tg-evals\">暂无</blockquote>")
