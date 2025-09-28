@@ -41,6 +41,7 @@ from database.db_scheduling import posting_time_slots_db
 from database.db_media import media_db
 from config import BOT_TOKEN
 import aiohttp
+from services.user_scores_service import user_scores_service
 
 # 配置日志
 logging.basicConfig(
@@ -119,7 +120,7 @@ class SchedulerWorker:
             query_merchants = """
                 SELECT DISTINCT merchant_id 
                 FROM reviews 
-                WHERE is_confirmed_by_merchant = TRUE
+                WHERE is_confirmed_by_admin = 1 AND is_active = 1 AND is_deleted = 0
             """
             
             merchant_results = await db_manager.fetch_all(query_merchants)
@@ -160,6 +161,32 @@ class SchedulerWorker:
         finally:
             execution_time = (datetime.now() - start_time).total_seconds()
             logger.info(f"商家平均分计算任务执行完毕，耗时: {execution_time:.2f}秒")
+
+    async def update_all_user_scores(self):
+        """定时任务: 聚合 M2U 评分至 user_scores（每日3:05）。"""
+        start_time = datetime.now()
+        logger.info("开始执行用户评分聚合任务(user_scores)")
+        try:
+            updated = await user_scores_service.recalculate_all_user_scores()
+            logger.info(f"user_scores 聚合完成：更新 {updated} 个用户")
+        except Exception as e:
+            logger.error(f"用户评分聚合任务失败: {e}", exc_info=True)
+        finally:
+            execution_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"用户评分聚合任务执行完毕，耗时: {execution_time:.2f}秒")
+
+    async def build_user_leaderboards(self):
+        """定时任务: 生成排行榜缓存（每日3:10）。"""
+        start_time = datetime.now()
+        logger.info("开始执行用户排行榜生成任务")
+        try:
+            res = await user_scores_service.build_leaderboards(min_reviews=6)
+            logger.info(f"用户排行榜生成完成：{res}")
+        except Exception as e:
+            logger.error(f"用户排行榜生成失败: {e}", exc_info=True)
+        finally:
+            execution_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"用户排行榜生成任务执行完毕，耗时: {execution_time:.2f}秒")
     
     async def publish_pending_posts(self):
         """
@@ -623,7 +650,7 @@ class SchedulerWorker:
         # 任务2: 帖子自动发布 - 按时间槽动态注册（在 start() 中首次加载，并定时热更新）
         # 注意：这里不再固定每分钟触发，改为读取DB的 posting_time_slots
         logger.info("帖子自动发布将按‘时间槽配置’动态注册")
-        
+
         # 任务3: 服务到期处理 - 每日1:00
         self.scheduler.add_job(
             func=self.handle_expired_services,
@@ -633,6 +660,26 @@ class SchedulerWorker:
             replace_existing=True
         )
         logger.info("已注册任务: 服务到期处理 (每日1:00)")
+
+        # 任务4: 用户评分聚合 - 每日3:05
+        self.scheduler.add_job(
+            func=self.update_all_user_scores,
+            trigger=CronTrigger(hour=3, minute=5),
+            id='update_user_scores',
+            name='聚合用户M2U评分(user_scores)',
+            replace_existing=True
+        )
+        logger.info("已注册任务: 用户评分聚合 (每日3:05)")
+
+        # 任务5: 用户排行榜缓存 - 每日3:10
+        self.scheduler.add_job(
+            func=self.build_user_leaderboards,
+            trigger=CronTrigger(hour=3, minute=10),
+            id='build_user_leaderboards',
+            name='生成用户排行榜缓存',
+            replace_existing=True
+        )
+        logger.info("已注册任务: 用户排行榜缓存 (每日3:10)")
         
         logger.info("所有定时任务注册完成")
 

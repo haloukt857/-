@@ -65,6 +65,7 @@ def create_layout(title: str, content, show_nav: bool = True):
     user_submenu = [
         ("用户列表", "/users", "/users"),
         ("用户分析", "/users/analytics", "/users/analytics"),
+        ("排行榜", "/users/leaderboards", "/users/leaderboards"),
     ]
     
     # 创建菜单项的函数

@@ -266,11 +266,18 @@ class ReviewPublishService:
                 merchant_obj = None
             merchant_name = await ReviewPublishService._get_merchant_display_name(merchant_obj, bot)
 
-            # 用户匿名策略：否则显示 users 表中的显示名
+            # 用户匿名策略：读取同订单 U2M 的 reviews.is_anonymous；如不存在U2M，默认匿名
             user_disp = '匿名'
-            if not review.get('is_user_anonymous'):
-                uid = review.get('user_id') or (order.get('customer_user_id') if order else None)
-                user_disp = await ReviewPublishService._get_user_display_name(uid, bot)
+            try:
+                u2m_row = await db_manager.fetch_one("SELECT is_anonymous FROM reviews WHERE order_id=? LIMIT 1", (review.get('order_id'),))
+                is_anon = True
+                if u2m_row is not None:
+                    is_anon = bool(dict(u2m_row).get('is_anonymous'))
+                if not is_anon:
+                    uid = review.get('user_id') or (order.get('customer_user_id') if order else None)
+                    user_disp = await ReviewPublishService._get_user_display_name(uid, bot)
+            except Exception:
+                pass
 
             # 顶部信息
             bot_u = (DEEPLINK_BOT_USERNAME or '').lstrip('@')

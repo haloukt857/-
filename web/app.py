@@ -96,6 +96,7 @@ app.get("/users/{user_id}/detail")(users.user_detail)
 app.get("/users/export")(users.export_users)
 app.get("/users/analytics")(user_analytics.user_analytics_dashboard)
 app.get("/users/analytics-data")(user_analytics.user_analytics_data_api)
+app.get("/users/leaderboards")(users.users_leaderboards)
 
 # 订单管理路由（完整对齐旧版功能）
 app.get("/orders")(orders.orders_list)                                  # 订单列表页
@@ -130,6 +131,8 @@ app.post("/regions/district/{district_id}/toggle")(regions.toggle_district_statu
 
 # 激励系统路由
 app.get("/incentives")(incentives.incentives_dashboard)
+app.get("/incentives/rules")(incentives.incentive_rules)
+app.post("/incentives/rules")(incentives.incentive_rules_post)
 
 # 等级管理路由
 app.get("/incentives/levels")(incentives.levels_list)

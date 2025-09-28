@@ -6,7 +6,7 @@
 
 import logging
 from starlette.routing import Route
-from starlette.responses import Response
+from starlette.responses import JSONResponse
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 import json
@@ -313,23 +313,16 @@ async def user_analytics_dashboard(request: Request):
     return create_layout("用户数据分析", content, include_charts=True)
 
 @require_auth
-async def user_analytics_data_api(request: Request) -> Response:
+async def user_analytics_data_api(request: Request):
     """用户分析数据API - 唯一数据接口"""
     try:
         # 调用服务层唯一方法获取数据
         data = await UserMgmtService.get_user_charts_dataset()
-        return Response(
-            content=json.dumps(data),
-            media_type="application/json"
-        )
+        return JSONResponse(data)
     except Exception as e:
         logger.error(f"获取用户分析数据API失败: {e}")
         # 异常返回500，不提供兜底数据
-        return Response(
-            content=json.dumps({"error": f"数据获取失败: {str(e)}"}),
-            status_code=500,
-            media_type="application/json"
-        )
+        return JSONResponse({"error": f"数据获取失败: {str(e)}"}, status_code=500)
 
 # 导出路由（实际注册在web/app.py中）
 user_analytics_routes = [

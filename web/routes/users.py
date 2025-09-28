@@ -11,6 +11,7 @@ from starlette.requests import Request
 # 导入布局和认证组件
 from ..layout import create_layout, require_auth, okx_form_group, okx_input, okx_button, okx_select
 from ..services.user_mgmt_service import UserMgmtService
+from database.db_connection import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,130 @@ async def users_dashboard(request: Request):
     )
     
     return create_layout("用户管理", content)
+
+
+@require_auth
+async def users_leaderboards(request: Request):
+    """用户排行榜（用户中心-只读）。"""
+    try:
+        dim = request.query_params.get('dimension', 'length')
+        dim_options = [
+            ('attack_quality', '出击素质'),
+            ('length', '长度'),
+            ('hardness', '硬度'),
+            ('duration', '时间'),
+            ('user_temperament', '用户气质'),
+        ]
+        dim_label = dict(dim_options).get(dim, '长度')
+
+        # Top50
+        rows = await db_manager.fetch_all(
+            """
+            SELECT l.user_id, l.avg_score, l.reviews_count, l.rank,
+                   u.username
+            FROM user_score_leaderboards l
+            LEFT JOIN users u ON u.user_id = l.user_id
+            WHERE l.dimension = ?
+            ORDER BY l.rank
+            LIMIT 50
+            """,
+            (dim,)
+        )
+        # 自查
+        user_id_q = request.query_params.get('user_id', '').strip()
+        my_rows = []
+        if user_id_q:
+            try:
+                uid = int(user_id_q)
+                my_rows = await db_manager.fetch_all(
+                    "SELECT dimension, avg_score, reviews_count, rank FROM user_score_leaderboards WHERE user_id=? ORDER BY dimension",
+                    (uid,)
+                )
+            except ValueError:
+                my_rows = []
+
+        # 维度选择与自查
+        selector = Form(
+            Div(
+                Div(
+                    Label("维度", cls="label"),
+                    Select(
+                        *[Option(lbl, value=key, selected=(dim==key)) for key, lbl in dim_options],
+                        name="dimension", cls="select select-bordered"
+                    ),
+                    cls="form-control"
+                ),
+                Div(
+                    Label("用户ID 自查", cls="label"),
+                    Input(name="user_id", value=user_id_q, placeholder="输入用户ID查看名次", cls="input input-bordered"),
+                    cls="form-control"
+                ),
+                Div(
+                    Label("操作", cls="label opacity-0"),
+                    Div(Button("查询", type="submit", cls="btn btn-primary")),
+                    cls="form-control"
+                ),
+                cls="grid grid-cols-1 md:grid-cols-3 gap-4"
+            ),
+            method="get",
+            action="/users/leaderboards",
+            cls="card bg-base-100 shadow p-4 mb-4"
+        )
+
+        # Top50 表格
+        table = Div(
+            H2(f"{dim_label} Top50", cls="text-lg font-semibold mb-2"),
+            Table(
+                Thead(Tr(Th("名次"), Th("用户名称"), Th("均分"), Th("被评价人数"))),
+                Tbody(
+                    *[
+                        Tr(
+                            Td(str(r['rank'])),
+                            Td((r.get('username') or '').strip() or f"#{r['user_id']}"),
+                            Td(f"{float(r['avg_score']):.2f}"),
+                            Td(f"被{int(r['reviews_count'])}位老师/商家评价")
+                        ) for r in (rows or [])
+                    ] if rows else [Tr(Td("暂无数据", colspan="4", cls="text-center text-gray-500"))]
+                ),
+                cls="table table-zebra w-full"
+            ),
+            cls="card bg-base-100 shadow p-4 mb-6"
+        )
+
+        my_panel = []
+        if user_id_q:
+            my_panel.append(H2(f"用户 #{user_id_q} 的名次", cls="text-lg font-semibold mb-2"))
+            if my_rows:
+                my_panel.append(
+                    Table(
+                        Thead(Tr(Th("维度"), Th("均分"), Th("被评价人数"), Th("名次"))),
+                        Tbody(
+                            *[
+                                Tr(
+                                    Td(dict(dim_options).get(d['dimension'], d['dimension'])),
+                                    Td(f"{float(d['avg_score']):.2f}"),
+                                    Td(f"被{int(d['reviews_count'])}位老师/商家评价"),
+                                    Td(str(d['rank']))
+                                ) for d in my_rows
+                            ]
+                        ),
+                        cls="table table-compact w-full"
+                    )
+                )
+            else:
+                my_panel.append(P("该用户暂无上榜记录或样本不足（至少6次）。", cls="text-gray-500"))
+
+        content = Div(
+            H1("用户排行榜", cls="page-title"),
+            P("仅供查看，不提供编辑功能。榜单由每日任务生成缓存。", cls="page-subtitle mb-4"),
+            selector,
+            table,
+            *my_panel,
+        )
+        return create_layout("用户排行榜", content)
+    except Exception as e:
+        logger.error(f"用户排行榜页面错误: {e}")
+        return create_layout("错误", Div(P("加载失败"), P(str(e), cls="text-error")))
 
 
 @require_auth

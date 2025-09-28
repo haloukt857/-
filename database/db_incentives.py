@@ -42,7 +42,7 @@ class IncentiveManager:
             raise
 
     @staticmethod
-    async def add_level(level_name: str, xp_required: int) -> Optional[int]:
+    async def add_level(level_name: str, xp_required: int, points_on_level_up: int = 0) -> Optional[int]:
         """
         添加新等级
         
@@ -77,8 +77,8 @@ class IncentiveManager:
                 raise ValueError(f"经验值 {xp_required} 已被其他等级使用")
             
             # 插入新等级
-            query = "INSERT INTO user_levels (level_name, xp_required) VALUES (?, ?)"
-            level_id = await db_manager.get_last_insert_id(query, (level_name.strip(), xp_required))
+            query = "INSERT INTO user_levels (level_name, xp_required, points_on_level_up) VALUES (?, ?, ?)"
+            level_id = await db_manager.get_last_insert_id(query, (level_name.strip(), xp_required, int(points_on_level_up or 0)))
             
             logger.info(f"等级创建成功: {level_name}, 经验值: {xp_required}, ID: {level_id}")
             return level_id
@@ -91,7 +91,7 @@ class IncentiveManager:
             raise
 
     @staticmethod
-    async def update_level(level_id: int, new_name: str, new_xp: int) -> bool:
+    async def update_level(level_id: int, new_name: str, new_xp: int, points_on_level_up: int = None) -> bool:
         """
         更新现有等级信息
         
@@ -133,8 +133,13 @@ class IncentiveManager:
                 raise ValueError(f"经验值 {new_xp} 已被其他等级使用")
             
             # 执行更新
-            update_query = "UPDATE user_levels SET level_name = ?, xp_required = ? WHERE id = ?"
-            result = await db_manager.execute_query(update_query, (new_name.strip(), new_xp, level_id))
+            if points_on_level_up is None:
+                update_query = "UPDATE user_levels SET level_name = ?, xp_required = ? WHERE id = ?"
+                params = (new_name.strip(), new_xp, level_id)
+            else:
+                update_query = "UPDATE user_levels SET level_name = ?, xp_required = ?, points_on_level_up = ? WHERE id = ?"
+                params = (new_name.strip(), new_xp, int(points_on_level_up), level_id)
+            result = await db_manager.execute_query(update_query, params)
             
             if result > 0:
                 logger.info(f"等级更新成功: ID {level_id}, 新名称: {new_name}, 新经验值: {new_xp}")

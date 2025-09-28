@@ -49,7 +49,6 @@ class MerchantReviewsManager:
         user_id: int,
         ratings: Dict[str, int],
         text: Optional[str] = None,
-        is_user_anonymous: bool = False,
     ) -> Optional[int]:
         if not _validate_ratings_m2u(ratings):
             logger.error("create m2u invalid ratings")
@@ -57,7 +56,7 @@ class MerchantReviewsManager:
         sql = (
             "INSERT INTO merchant_reviews (order_id, merchant_id, user_id, "
             "rating_attack_quality, rating_length, rating_hardness, rating_duration, rating_user_temperament, "
-            "text_review_by_merchant, is_user_anonymous) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "text_review_by_merchant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             order_id,
@@ -69,7 +68,6 @@ class MerchantReviewsManager:
             ratings["rating_duration"],
             ratings["rating_user_temperament"],
             text,
-            1 if is_user_anonymous else 0,
         )
         try:
             new_id = await db_manager.get_last_insert_id(sql, params)
@@ -209,15 +207,7 @@ class MerchantReviewsManager:
             logger.error(f"soft_delete m2u failed: {e}")
             return False
 
-    @staticmethod
-    async def set_user_anonymous_flag(review_id: int, is_anon: bool) -> bool:
-        sql = "UPDATE merchant_reviews SET is_user_anonymous=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
-        try:
-            rc = await db_manager.execute_query(sql, (1 if is_anon else 0, review_id))
-            return bool(rc and rc >= 0)
-        except Exception as e:
-            logger.error(f"set_user_anonymous_flag m2u failed: {e}")
-            return False
+    # 注意：匿名标记以同订单 U2M 的 reviews.is_anonymous 为唯一真源，此处不提供 M2U 匿名设置接口
 
     @staticmethod
     async def set_report_link(review_id: int, url: str, published_at: Optional[datetime] = None) -> bool:

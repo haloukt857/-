@@ -209,7 +209,7 @@ class ReviewManager:
                 AVG(CAST(rating_environment AS REAL)) as avg_environment,
                 COUNT(*) as total_reviews_count
             FROM reviews 
-            WHERE merchant_id = ? AND is_confirmed_by_merchant = TRUE
+            WHERE merchant_id = ? AND is_confirmed_by_admin = 1 AND is_active = 1 AND is_deleted = 0
         """
         
         try:
@@ -509,7 +509,7 @@ class ReviewManager:
                     rating_attitude + rating_environment
                 ) / 5.0) as avg_rating
                 FROM reviews 
-                WHERE is_confirmed_by_merchant = TRUE
+                WHERE is_confirmed_by_admin = 1 AND is_active = 1 AND is_deleted = 0
                 AND rating_appearance > 0
             """
             

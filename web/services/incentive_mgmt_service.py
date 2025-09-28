@@ -132,7 +132,7 @@ class IncentiveMgmtService:
             }
     
     @staticmethod
-    async def create_level(name: str, required_experience: int, description: Optional[str] = None) -> Dict[str, Any]:
+    async def create_level(name: str, required_experience: int, points_on_level_up: int = 0, description: Optional[str] = None) -> Dict[str, Any]:
         """
         创建新等级
         
@@ -145,8 +145,8 @@ class IncentiveMgmtService:
             dict: 创建结果
         """
         try:
-            # 调用数据库管理器的add_level方法（不支持description参数）
-            level_id = await incentive_manager.add_level(name, required_experience)
+            # 调用数据库管理器的add_level方法（带升级奖励积分）
+            level_id = await incentive_manager.add_level(name, required_experience, points_on_level_up)
             
             if level_id:
                 # 清除相关缓存
@@ -169,7 +169,7 @@ class IncentiveMgmtService:
             return {'success': False, 'error': str(e)}
     
     @staticmethod
-    async def update_level(level_id: int, name: str, required_experience: int, description: Optional[str] = None) -> Dict[str, Any]:
+    async def update_level(level_id: int, name: str, required_experience: int, points_on_level_up: Optional[int] = None, description: Optional[str] = None) -> Dict[str, Any]:
         """
         更新等级
         
@@ -183,8 +183,11 @@ class IncentiveMgmtService:
             dict: 更新结果
         """
         try:
-            # 调用数据库管理器的update_level方法（参数名为new_name, new_xp）
-            result = await incentive_manager.update_level(level_id, name, required_experience)
+            # 调用数据库管理器的update_level方法（参数名为new_name, new_xp, points_on_level_up）
+            if points_on_level_up is None:
+                result = await incentive_manager.update_level(level_id, name, required_experience)
+            else:
+                result = await incentive_manager.update_level(level_id, name, required_experience, points_on_level_up)
             
             if result:
                 # 清除相关缓存
@@ -470,10 +473,14 @@ class IncentiveMgmtService:
             active_users_result = await db_manager.fetch_one(active_users_query)
             active_users = active_users_result['active'] if active_users_result else 0
             
-            # 获取平均等级
-            avg_level_query = "SELECT AVG(level) as avg_level FROM users"
+            # 获取平均等级（以 user_levels.xp_required 作为等级度量进行平均）
+            avg_level_query = """
+                SELECT AVG(ul.xp_required) AS avg_level_metric
+                FROM users u
+                LEFT JOIN user_levels ul ON u.level_name = ul.level_name
+            """
             avg_level_result = await db_manager.fetch_one(avg_level_query)
-            avg_level = round(avg_level_result['avg_level'], 1) if avg_level_result and avg_level_result['avg_level'] else 0
+            avg_level = round(avg_level_result['avg_level_metric'], 1) if avg_level_result and avg_level_result['avg_level_metric'] is not None else 0
             
             # 获取勋章总发放数
             badge_count_query = "SELECT COUNT(*) as total_badges FROM user_badges"
@@ -518,15 +525,15 @@ class IncentiveMgmtService:
         try:
             levels_query = """
                 SELECT 
-                    COALESCE(u.level_name, '未设置') as level_name,
-                    ul.xp_required as xp_required,
-                    COUNT(*) as user_count,
-                    AVG(u.points) as avg_points,
+                    COALESCE(u.level_name, '未设置') AS level_name,
+                    ul.xp_required AS xp_required,
+                    COUNT(*) AS user_count,
+                    AVG(u.points) AS avg_points,
                     AVG(CASE WHEN u.badges IS NULL OR u.badges = '[]' THEN 0 
-                             ELSE (LENGTH(u.badges) - LENGTH(REPLACE(u.badges, ',', '')) + 1) END) as avg_badges
+                             ELSE (LENGTH(u.badges) - LENGTH(REPLACE(u.badges, ',', '')) + 1) END) AS avg_badges
                 FROM users u
                 LEFT JOIN user_levels ul ON u.level_name = ul.level_name
-                GROUP BY level_name, xp_required
+                GROUP BY u.level_name, ul.xp_required
             """
             rows = await db_manager.fetch_all(levels_query)
             data = [dict(r) for r in rows] if rows else []

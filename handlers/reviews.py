@@ -201,6 +201,20 @@ async def on_m2u_start(cb: CallbackQuery, state: FSMContext):
         await safe_answer_callback(cb, msg, show_alert=True)
         return
 
+    # 门槛校验：必须存在已被管理员确认的 U2M 评价（防刷）
+    try:
+        row = await db_manager.fetch_one(
+            "SELECT id FROM reviews WHERE order_id=? AND is_confirmed_by_admin=1 AND is_active=1 AND is_deleted=0 LIMIT 1",
+            (order_id,)
+        )
+        if not row:
+            await safe_answer_callback(cb, "请先完成并通过管理员确认用户→商户评价，再进行商户→用户评价。", show_alert=True)
+            return
+    except Exception as e:
+        logger.warning(f"M2U 门槛检查失败: {e}")
+        await safe_answer_callback(cb, "系统繁忙，请稍后再试", show_alert=True)
+        return
+
     # 若订单尚未完成，点击该按钮即视为已完成
     try:
         if str(order.get("status")) != "已完成":
@@ -393,11 +407,11 @@ async def on_submit_final(cb: CallbackQuery, state: FSMContext):
         if existed:
             ok1 = await merchant_reviews_manager.update_scores(existed["id"], ratings)
             ok2 = await merchant_reviews_manager.update_text(existed["id"], text_review)
-            ok3 = await merchant_reviews_manager.set_user_anonymous_flag(existed["id"], is_anon)
-            success = ok1 and ok2 and ok3
+            success = ok1 and ok2
             review_id = existed["id"] if success else None
         else:
-            review_id = await merchant_reviews_manager.create(order_id, order["merchant_id"], order["customer_user_id"], ratings, text_review, is_user_anonymous=is_anon)
+            # M2U 不再单独存储匿名标记，匿名取自同订单 U2M 的 reviews.is_anonymous
+            review_id = await merchant_reviews_manager.create(order_id, order["merchant_id"], order["customer_user_id"], ratings, text_review)
             success = review_id is not None
 
     if not success:
@@ -568,6 +582,15 @@ async def on_admin_confirm(cb: CallbackQuery):
             if order:
                 user_id = order.get('customer_user_id')
                 merchant_chat_id = order.get('merchant_chat_id')
+                # 激励处理：U2M（积分+经验），M2U（仅经验）
+                try:
+                    from services.incentive_processor import incentive_processor
+                    if direction == 'u2m' and user_id:
+                        await incentive_processor.process_confirmed_review_rewards(int(user_id), review_id, int(order_id))
+                    elif direction == 'm2u' and user_id:
+                        await incentive_processor.process_confirmed_m2u_review_rewards(int(user_id), review_id, int(order_id))
+                except Exception as e:
+                    logger.warning(f"激励处理失败（已忽略）：{e}")
                 try:
                     if direction == 'u2m':
                         if user_id:

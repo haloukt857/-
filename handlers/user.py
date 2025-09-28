@@ -40,6 +40,29 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# 维度标签映射（M2U）
+DIM_LABELS = {
+    'attack_quality': '出击素质',
+    'length': '长度',
+    'hardness': '硬度',
+    'duration': '时间',
+    'user_temperament': '用户气质',
+}
+
+async def _get_display_name(bot, uid: int) -> str:
+    try:
+        chat = await bot.get_chat(int(uid))
+        parts = []
+        fn = getattr(chat, 'first_name', None)
+        ln = getattr(chat, 'last_name', None)
+        if isinstance(fn, str) and fn.strip():
+            parts.append(fn.strip())
+        if isinstance(ln, str) and ln.strip():
+            parts.append(ln.strip())
+        return " ".join(parts) or str(uid)
+    except Exception:
+        return str(uid)
 _fsm_db_profile = create_fsm_db_manager(db_manager)
 
 # 会话级“当前城市”上下文（内存态）。
@@ -659,7 +682,8 @@ async def profile_command(message: Message, override_user=None):
 {badges_text_template.format(badges_text=badges_text)}"""
     # 用户资料 + 功能按钮（含“我的出击记录”）
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🗒️ 我的出击记录", callback_data="my_attack_records")]
+        [InlineKeyboardButton(text="🗒️ 我的出击记录", callback_data="my_attack_records")],
+        [InlineKeyboardButton(text="📈 查看排行榜", callback_data="user_rank_menu")]
     ])
     await message.answer(profile_card, reply_markup=kb, parse_mode="Markdown")
 
@@ -763,4 +787,74 @@ async def merchant_attack_records_callback(callback: CallbackQuery):
     except Exception as e:
         logger.error(f"加载商户服务记录失败: {e}")
         await callback.message.answer("加载服务记录失败，请稍后再试。")
+        await callback.answer()
+
+
+@router.callback_query(F.data == "user_rank_menu")
+async def user_rank_menu(callback: CallbackQuery):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{DIM_LABELS['attack_quality']} Top50", callback_data="user_rank:dim:attack_quality")],
+        [InlineKeyboardButton(text=f"{DIM_LABELS['length']} Top50", callback_data="user_rank:dim:length")],
+        [InlineKeyboardButton(text=f"{DIM_LABELS['hardness']} Top50", callback_data="user_rank:dim:hardness")],
+        [InlineKeyboardButton(text=f"{DIM_LABELS['duration']} Top50", callback_data="user_rank:dim:duration")],
+        [InlineKeyboardButton(text=f"{DIM_LABELS['user_temperament']} Top50", callback_data="user_rank:dim:user_temperament")],
+    ])
+    await callback.message.answer("请选择要查看的维度排行榜：", reply_markup=kb)
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^user_rank:dim:(attack_quality|length|hardness|duration|user_temperament)$"))
+async def user_rank_show(callback: CallbackQuery):
+    try:
+        dim = callback.data.split(':')[-1]
+        label = DIM_LABELS.get(dim, dim)
+        # Top50
+        rows = await db_manager.fetch_all(
+            "SELECT user_id, avg_score, reviews_count, rank FROM user_score_leaderboards WHERE dimension=? ORDER BY rank LIMIT 50",
+            (dim,)
+        )
+        lines = [f"🏆 {label} 排行榜 Top50:\n"]
+        if rows:
+            for r in rows:
+                d = dict(r)
+                name = await _get_display_name(callback.message.bot, int(d['user_id']))
+                lines.append(f"{d['rank']:>2}. {name}  {float(d['avg_score']):.2f} 分｜被{int(d['reviews_count'])}位老师/商家评价")
+        else:
+            lines.append("暂无数据")
+
+        # 我的名次
+        uid = int(callback.from_user.id)
+        my_row = await db_manager.fetch_one(
+            "SELECT user_id, avg_score, reviews_count, rank FROM user_score_leaderboards WHERE dimension=? AND user_id=?",
+            (dim, uid)
+        )
+        lines.append("")
+        if my_row:
+            md = dict(my_row)
+            lines.append(f"你在“{label}”的均分 {float(md['avg_score']):.2f} 分，当前第 {int(md['rank'])} 名（被{int(md['reviews_count'])}位老师/商家评价）。")
+        else:
+            us = await db_manager.fetch_one("SELECT * FROM user_scores WHERE user_id=?", (uid,))
+            score = None
+            cnt = 0
+            if us:
+                du = dict(us)
+                col = {
+                    'attack_quality': 'avg_attack_quality',
+                    'length': 'avg_length',
+                    'hardness': 'avg_hardness',
+                    'duration': 'avg_duration',
+                    'user_temperament': 'avg_user_temperament',
+                }[dim]
+                score = du.get(col)
+                cnt = int(du.get('total_reviews_count') or 0)
+            if score is not None and cnt > 0:
+                lines.append(f"你在“{label}”的当前均分 {float(score):.2f} 分，被{cnt}位老师/商家评价；暂未上榜或样本不足（至少6次）。")
+            else:
+                lines.append(f"你在“{label}”暂无有效评分（至少6次才计入排行榜）。")
+
+        await callback.message.answer("\n".join(lines))
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"加载排行榜失败: {e}")
+        await callback.message.answer("加载排行榜失败，请稍后再试。")
         await callback.answer()

@@ -16,26 +16,24 @@ logger = logging.getLogger(__name__)
 class UserManager:
     @staticmethod
     async def get_users_with_incentives() -> List[Dict[str, Any]]:
-        """获取带有激励信息的用户列表"""
+        """获取带有激励信息的用户列表（对齐当前 users 表结构）。"""
         query = """
             SELECT 
-                user_id as id,
-                first_name,
-                last_name,
+                user_id AS id,
                 username,
-                level,
+                level_name,
                 points,
-                xp as experience,
+                xp,
                 badges
             FROM users 
-            ORDER BY points DESC, level DESC
+            ORDER BY points DESC, xp DESC
         """
         try:
             results = await db_manager.fetch_all(query)
             users = []
             for result in results:
                 user_dict = dict(result)
-                # 解析badges JSON字段
+                # 解析 badges JSON 字段
                 try:
                     if user_dict.get('badges'):
                         user_dict['badges'] = json.loads(user_dict['badges'])

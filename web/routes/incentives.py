@@ -23,6 +23,7 @@ def verify_csrf_token(request: Request, token: str) -> bool:
 from ..services.incentive_mgmt_service import IncentiveMgmtService
 from database.db_incentives import incentive_manager
 from database.db_users import user_manager
+from database.db_system_config import system_config_manager
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +65,8 @@ async def user_incentives_management(request: Request):
                 ),
                 Div(
                     Div(
-                        H3("平均等级", cls="text-lg font-semibold text-base-content"),
-                        P(f"{sum(u.get('level', 0) for u in users_data) / len(users_data) if users_data else 0:.1f}", cls="text-3xl font-bold text-accent mt-2"),
+                        H3("平均经验", cls="text-lg font-semibold text-base-content"),
+                        P(f"{sum(u.get('xp', 0) for u in users_data) / len(users_data) if users_data else 0:.1f}", cls="text-3xl font-bold text-accent mt-2"),
                         cls="stat"
                     ),
                     cls="stat bg-base-100 rounded-lg shadow"
@@ -99,10 +100,10 @@ async def user_incentives_management(request: Request):
                         *[
                             Tr(
                                 Td(str(user.get('id', 'N/A'))),
-                                Td(user.get('first_name', 'N/A') + (f" {user.get('last_name', '')}" if user.get('last_name') else "")),
-                                Td(f"等级 {user.get('level', 0)}", cls="text-center"),
+                                Td(user.get('username', '') or f"#{user.get('id','')}", cls="truncate max-w-[240px]"),
+                                Td(str(user.get('level_name', '新手')), cls="text-center"),
                                 Td(str(user.get('points', 0)), cls="text-center"),
-                                Td(str(user.get('experience', 0)), cls="text-center"),
+                                Td(str(user.get('xp', 0)), cls="text-center"),
                                 Td(str(len(user.get('badges', []))), cls="text-center"),
                                 Td(
                                     Div(
@@ -444,9 +445,8 @@ async def users_export(request: Request):
             if isinstance(badges, list):
                 import json as _json
                 badges = _json.dumps(badges, ensure_ascii=False)
-            # 映射正确的字段名：数据库返回 id, username, level, experience, points
-            username = u.get('username') or f"{u.get('first_name', '')} {u.get('last_name', '')}".strip()
-            line = f"{u.get('id','')},{username},{u.get('level','')},{u.get('experience','')},{u.get('points','')},{badges or ''}"
+            username = u.get('username') or f"#{u.get('id','')}"
+            line = f"{u.get('id','')},{username},{u.get('level_name','')},{u.get('xp','')},{u.get('points','')},{badges or ''}"
             rows.append(line)
         csv = "\n".join(rows)
         return Response(csv, media_type='text/csv', headers={'Content-Disposition': 'attachment; filename="users_export.csv"'})
@@ -602,6 +602,16 @@ async def incentives_dashboard(request: Request):
                 Div(
                     A(
                         Div(
+                            Span("⚙️", cls="text-2xl"),
+                            Span("积分/经验规则", cls="font-semibold"),
+                            P("配置评价奖励（保存即生效）", cls="text-sm text-gray-500"),
+                            cls="flex flex-col items-center p-4"
+                        ),
+                        href="/incentives/rules",
+                        cls="card bg-base-100 shadow hover:shadow-lg transition-shadow"
+                    ),
+                    A(
+                        Div(
                             Span("🏆", cls="text-2xl"),
                             Span("等级管理", cls="font-semibold"),
                             P("配置用户等级和经验要求", cls="text-sm text-gray-500"),
@@ -623,8 +633,8 @@ async def incentives_dashboard(request: Request):
                     A(
                         Div(
                             Span("👥", cls="text-2xl"),
-                            Span("用户激励", cls="font-semibold"),
-                            P("查看和管理用户激励状态", cls="text-sm text-gray-500"),
+                            Span("用户管理", cls="font-semibold"),
+                            P("查看与导出用户激励数据", cls="text-sm text-gray-500"),
                             cls="flex flex-col items-center p-4"
                         ),
                         href="/incentives/users",
@@ -632,7 +642,7 @@ async def incentives_dashboard(request: Request):
                     ),
                     A(
                         Div(
-                            Span("📈", cls="text-2xl"),
+                            Span("📊", cls="text-2xl"),
                             Span("数据分析", cls="font-semibold"),
                             P("激励系统效果分析", cls="text-sm text-gray-500"),
                             cls="flex flex-col items-center p-4"
@@ -679,6 +689,179 @@ async def incentives_dashboard(request: Request):
         return create_layout("系统错误", error_content)
 
 
+# ==================== 动态积分/经验规则配置 ==================== #
+
+@require_auth
+async def incentive_rules(request: Request):
+    try:
+        cfg = await system_config_manager.get_config('points_config', default={}) or {}
+        u2m = cfg.get('u2m_review', {})
+        m2u = cfg.get('m2u_review', {})
+        oc = cfg.get('order_complete', {})
+
+        # 提取字段，提供默认值
+        oc_points = int(oc.get('points', 0) or 0)
+        oc_xp = int(oc.get('xp', 0) or 0)
+
+        u2m_base_p = int(u2m.get('base', {}).get('points', 0) or 0)
+        u2m_base_x = int(u2m.get('base', {}).get('xp', 0) or 0)
+        u2m_hi_min = float(u2m.get('high_score_bonus', {}).get('min_avg', 8.0) or 8.0)
+        u2m_hi_p = int(u2m.get('high_score_bonus', {}).get('points', 0) or 0)
+        u2m_hi_x = int(u2m.get('high_score_bonus', {}).get('xp', 0) or 0)
+        u2m_txt_min = int(u2m.get('text_bonus', {}).get('min_len', 10) or 10)
+        u2m_txt_p = int(u2m.get('text_bonus', {}).get('points', 0) or 0)
+        u2m_txt_x = int(u2m.get('text_bonus', {}).get('xp', 0) or 0)
+
+        m2u_enable_points = bool(m2u.get('enable_points', False))
+        m2u_base_x = int(m2u.get('base', {}).get('xp', 0) or 0)
+        m2u_hi_min = float(m2u.get('high_score_bonus', {}).get('min_avg', 8.0) or 8.0)
+        m2u_hi_x = int(m2u.get('high_score_bonus', {}).get('xp', 0) or 0)
+        m2u_txt_min = int(m2u.get('text_bonus', {}).get('min_len', 10) or 10)
+        m2u_txt_x = int(m2u.get('text_bonus', {}).get('xp', 0) or 0)
+
+        csrf = get_or_create_csrf_token(request)
+
+        # 表单模式
+        form_struct = Form(
+            Input(type="hidden", name="csrf_token", value=csrf),
+            Input(type="hidden", name="mode", value="form"),
+            H2("订单完成奖励", cls="text-lg font-semibold mt-2 mb-2"),
+            Div(
+                okx_form_group("完成积分", okx_input("oc_points", type="number", min="0", value=str(oc_points), required=True), "完成订单固定积分奖励"),
+                okx_form_group("完成经验", okx_input("oc_xp", type="number", min="0", value=str(oc_xp), required=True), "完成订单固定经验奖励"),
+                cls="grid grid-cols-1 md:grid-cols-2 gap-4"
+            ),
+            H2("U2M 评价奖励", cls="text-lg font-semibold mt-6 mb-2"),
+            Div(
+                okx_form_group("基础积分", okx_input("u2m_base_points", type="number", min="0", value=str(u2m_base_p), required=True), "管理员确认后固定积分"),
+                okx_form_group("基础经验", okx_input("u2m_base_xp", type="number", min="0", value=str(u2m_base_x), required=True), "管理员确认后固定经验"),
+                okx_form_group("高分阈值(0-10)", okx_input("u2m_hi_min_avg", type="number", step="any", min="0", max="10", value=str(u2m_hi_min), required=True), "评价均分≥此值触发加成"),
+                okx_form_group("高分加成(积分)", okx_input("u2m_hi_points", type="number", min="0", value=str(u2m_hi_p), required=True), "高分额外积分"),
+                okx_form_group("高分加成(经验)", okx_input("u2m_hi_xp", type="number", min="0", value=str(u2m_hi_x), required=True), "高分额外经验"),
+                okx_form_group("文字最短(字)", okx_input("u2m_txt_min_len", type="number", min="0", value=str(u2m_txt_min), required=True), "文字≥此长度触发加成"),
+                okx_form_group("文字加成(积分)", okx_input("u2m_txt_points", type="number", min="0", value=str(u2m_txt_p), required=True), "文字额外积分"),
+                okx_form_group("文字加成(经验)", okx_input("u2m_txt_xp", type="number", min="0", value=str(u2m_txt_x), required=True), "文字额外经验"),
+                cls="grid grid-cols-1 md:grid-cols-3 gap-4"
+            ),
+            H2("M2U 评价奖励", cls="text-lg font-semibold mt-6 mb-2"),
+            Div(
+                okx_form_group("是否加积分", okx_select("m2u_enable_points", [("false","不加积分"),("true","加积分(不推荐)")], selected=("true" if m2u_enable_points else "false")), "一般设为不加积分"),
+                okx_form_group("基础经验", okx_input("m2u_base_xp", type="number", min="0", value=str(m2u_base_x), required=True), "管理员确认后固定经验"),
+                okx_form_group("高分阈值(0-10)", okx_input("m2u_hi_min_avg", type="number", step="any", min="0", max="10", value=str(m2u_hi_min), required=True), "评价均分≥此值触发加成"),
+                okx_form_group("高分加成(经验)", okx_input("m2u_hi_xp", type="number", min="0", value=str(m2u_hi_x), required=True), "高分额外经验"),
+                okx_form_group("文字最短(字)", okx_input("m2u_txt_min_len", type="number", min="0", value=str(m2u_txt_min), required=True), "文字≥此长度触发加成"),
+                okx_form_group("文字加成(经验)", okx_input("m2u_txt_xp", type="number", min="0", value=str(m2u_txt_x), required=True), "文字额外经验"),
+                cls="grid grid-cols-1 md:grid-cols-3 gap-4"
+            ),
+            Div(
+                Button("保存", type="submit", cls="btn btn-primary"),
+                A("返回激励系统", href="/incentives", cls="btn btn-ghost ml-2"),
+                cls="mt-4"
+            ),
+            method="post",
+            action="/incentives/rules",
+            cls="card bg-base-100 shadow p-6 mb-8"
+        )
+
+        # 高级(JSON)模式（可选）
+        pretty = json.dumps(cfg or {}, ensure_ascii=False, indent=2)
+        form_json = Form(
+            H3("高级(JSON)编辑", cls="text-lg font-semibold mb-2"),
+            Textarea(pretty, name="config_json", rows="18", cls="textarea textarea-bordered w-full font-mono"),
+            Input(type="hidden", name="csrf_token", value=csrf),
+            Div(
+                Button("保存(JSON)", type="submit", cls="btn btn-outline"),
+                cls="mt-3"
+            ),
+            method="post",
+            action="/incentives/rules",
+            cls="card bg-base-100 shadow p-6"
+        )
+
+        content = Div(
+            H1("积分/经验规则", cls="page-title"),
+            P("修改后立即生效。建议使用表单模式；高级编辑提供JSON直改。", cls="page-subtitle mb-4"),
+            form_struct,
+            form_json,
+            cls="container mx-auto p-6 space-y-4"
+        )
+        return create_layout("积分/经验规则", content)
+    except Exception as e:
+        return create_layout("错误", Div(P("加载失败"), P(str(e), cls="text-error")))
+
+
+@require_auth
+async def incentive_rules_post(request: Request):
+    form = await request.form()
+    token = form.get('csrf_token')
+    if not verify_csrf_token(request, token):
+        return create_layout("错误", Div(P("CSRF 校验失败"), A("返回", href="/incentives/rules")))
+    mode = form.get('mode')
+    if mode == 'form':
+        try:
+            def to_int(name, default=0):
+                v = form.get(name, str(default))
+                return int(float(v))
+            def to_float(name, default=0.0):
+                v = form.get(name, str(default))
+                return float(v)
+
+            cfg = {
+                'order_complete': {
+                    'points': max(0, to_int('oc_points', 0)),
+                    'xp': max(0, to_int('oc_xp', 0)),
+                },
+                'u2m_review': {
+                    'base': {
+                        'points': max(0, to_int('u2m_base_points', 0)),
+                        'xp': max(0, to_int('u2m_base_xp', 0)),
+                    },
+                    'high_score_bonus': {
+                        'min_avg': max(0.0, min(10.0, to_float('u2m_hi_min_avg', 8.0))),
+                        'points': max(0, to_int('u2m_hi_points', 0)),
+                        'xp': max(0, to_int('u2m_hi_xp', 0)),
+                    },
+                    'text_bonus': {
+                        'min_len': max(0, to_int('u2m_txt_min_len', 10)),
+                        'points': max(0, to_int('u2m_txt_points', 0)),
+                        'xp': max(0, to_int('u2m_txt_xp', 0)),
+                    },
+                },
+                'm2u_review': {
+                    'enable_points': str(form.get('m2u_enable_points', 'false')).lower() == 'true',
+                    'base': {
+                        'xp': max(0, to_int('m2u_base_xp', 0)),
+                    },
+                    'high_score_bonus': {
+                        'min_avg': max(0.0, min(10.0, to_float('m2u_hi_min_avg', 8.0))),
+                        'xp': max(0, to_int('m2u_hi_xp', 0)),
+                    },
+                    'text_bonus': {
+                        'min_len': max(0, to_int('m2u_txt_min_len', 10)),
+                        'xp': max(0, to_int('m2u_txt_xp', 0)),
+                    },
+                },
+            }
+        except Exception as e:
+            return create_layout("错误", Div(P("表单数据无效"), P(str(e), cls="text-error"), A("返回", href="/incentives/rules", cls="btn btn-ghost mt-4")))
+
+        ok = await system_config_manager.set_config('points_config', cfg, description='激励规则配置（动态-表单）')
+        if not ok:
+            return create_layout("错误", Div(P("保存失败"), A("返回", href="/incentives/rules", cls="btn btn-ghost mt-4")))
+        return RedirectResponse(url="/incentives/rules?saved=1", status_code=302)
+    else:
+        # JSON 模式
+        raw = form.get('config_json') or ''
+        try:
+            parsed = json.loads(raw)
+        except Exception as e:
+            return create_layout("错误", Div(P("JSON 解析失败"), P(str(e), cls="text-error"), A("返回", href="/incentives/rules", cls="btn btn-ghost mt-4")))
+        ok = await system_config_manager.set_config('points_config', parsed, description='激励规则配置（动态-JSON）')
+        if not ok:
+            return create_layout("错误", Div(P("保存失败"), A("返回", href="/incentives/rules", cls="btn btn-ghost mt-4")))
+        return RedirectResponse(url="/incentives/rules?saved=1", status_code=302)
+
+
 # ==================== 等级管理路由 ==================== #
 
 @require_auth
@@ -718,6 +901,7 @@ async def levels_list(request: Request):
                                 Tr(
                                     Th("等级名称", cls="text-left"),
                                     Th("所需经验", cls="text-center"),
+                                    Th("升级奖励积分", cls="text-center"),
                                     Th("创建时间", cls="text-center"),
                                     Th("操作", cls="text-center"),
                                 )
@@ -727,6 +911,7 @@ async def levels_list(request: Request):
                                     Tr(
                                         Td(level['level_name'], cls="font-semibold"),
                                         Td(str(level['xp_required']), cls="text-center"),
+                                        Td(str(level.get('points_on_level_up', 0)), cls="text-center"),
                                         Td("--", cls="text-center text-sm text-gray-500"),  # 创建时间暂无
                                         Td(
                                             Div(
@@ -834,6 +1019,12 @@ async def levels_create(request: Request):
                         okx_input("xp_required", type="number", placeholder="0", min="0", required=True),
                         "用户需要多少经验值才能达到此等级"
                     ),
+                    # 升级奖励积分
+                    okx_form_group(
+                        "升级奖励积分",
+                        okx_input("points_on_level_up", type="number", placeholder="0", min="0", required=True),
+                        "升到此等级时额外奖励的积分（可填0）"
+                    ),
                     
                     # 操作按钮
                     Div(
@@ -873,6 +1064,8 @@ async def levels_create_post(request: Request):
         csrf_token = form_data.get('csrf_token')
         level_name = form_data.get('level_name', '').strip()
         xp_required = form_data.get('xp_required', '0')
+        points_on_level_up = form_data.get('points_on_level_up', '0')
+        points_on_level_up = form_data.get('points_on_level_up', '0')
         
         # 验证CSRF令牌
         if not validate_csrf(request, csrf_token):
@@ -889,8 +1082,16 @@ async def levels_create_post(request: Request):
         except ValueError:
             raise Exception("经验值必须是非负整数")
         
+        # 解析升级奖励积分
+        try:
+            points_on_level_up = int(points_on_level_up)
+            if points_on_level_up < 0:
+                raise ValueError
+        except ValueError:
+            raise Exception("升级奖励积分必须是非负整数")
+
         # 调用服务层创建等级
-        result = await IncentiveMgmtService.create_level(level_name, xp_required)
+        result = await IncentiveMgmtService.create_level(level_name, xp_required, points_on_level_up)
         
         if result.get('success'):
             # 创建成功，重定向到列表页
@@ -1013,6 +1214,12 @@ async def levels_edit(request: Request):
                                 value=str(level['xp_required']), required=True),
                         "用户需要多少经验值才能达到此等级"
                     ),
+                    okx_form_group(
+                        "升级奖励积分",
+                        okx_input("points_on_level_up", type="number", placeholder="0", min="0", 
+                                value=str(level.get('points_on_level_up', 0))),
+                        "升到此等级时额外奖励的积分（可填0）"
+                    ),
                     
                     Div(
                         okx_button("保存修改", type="submit", cls="btn btn-primary"),
@@ -1074,8 +1281,16 @@ async def levels_edit_post(request: Request):
         except ValueError:
             raise Exception("经验值必须是非负整数")
         
+        # 解析升级奖励积分
+        try:
+            points_on_level_up = int(points_on_level_up)
+            if points_on_level_up < 0:
+                raise ValueError
+        except ValueError:
+            raise Exception("升级奖励积分必须是非负整数")
+
         # 调用服务层更新等级
-        result = await IncentiveMgmtService.update_level(level_id, level_name, xp_required)
+        result = await IncentiveMgmtService.update_level(level_id, level_name, xp_required, points_on_level_up)
         
         if result.get('success'):
             # 更新成功，重定向到列表页
@@ -1544,21 +1759,27 @@ async def badge_triggers_create(request: Request):
                     "触发类型",
                     okx_select("trigger_type", [
                         ("", "请选择触发类型"),
-                        ("order_count", "订单完成数量"),
-                        ("perfect_reviews", "完美评价数量"),
-                        ("total_points", "累计积分"),
-                        ("total_experience", "累计经验"),
-                        ("consecutive_good_reviews", "连续好评")
+                        ("order_count_min", "订单完成数 ≥N"),
+                        ("order_count_max", "订单完成数 ≤N"),
+                        ("u2m_confirmed_reviews_min", "U2M确认评价数 ≥N"),
+                        ("m2u_reviews_min", "M2U有效评价数 ≥N"),
+                        ("m2u_avg_attack_quality_min", "出击素质均分 ≥X"),
+                        ("m2u_avg_length_min", "长度均分 ≥X"),
+                        ("m2u_avg_hardness_min", "硬度均分 ≥X"),
+                        ("m2u_avg_duration_min", "时间均分 ≥X"),
+                        ("m2u_avg_user_temperament_min", "用户气质均分 ≥X"),
+                        ("total_points_min", "累计积分 ≥N"),
+                        ("total_xp_min", "累计经验 ≥N")
                     ], required=True),
-                    "选择勋章的触发条件类型"
+                    "选择触发条件（同一勋章多条件按 AND 组合）"
                 ),
                 
                 # 触发值
                 okx_form_group(
                     "触发值",
-                    okx_input("trigger_value", type="number", min="1", required=True, 
-                             placeholder="请输入触发条件的数值"),
-                    "达到此数值时获得勋章"
+                    okx_input("trigger_value", type="number", step="any", min="0", required=True, 
+                             placeholder="请输入阈值（整数或小数）"),
+                    "达到阈值即满足该条件"
                 ),
                 
                 # 提交按钮

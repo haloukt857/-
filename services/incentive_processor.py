@@ -24,6 +24,9 @@ from database.db_users import user_manager
 from database.db_incentives import incentive_manager
 from database.db_orders import order_manager
 from database.db_reviews import review_manager
+from database.db_system_config import system_config_manager
+from database.db_user_scores import user_scores_manager
+from database.db_connection import db_manager
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +67,8 @@ class IncentiveProcessor:
                 'new_level': None
             }
             
-            # 1. 发放评价基础奖励
-            base_rewards = await IncentiveProcessor._calculate_review_base_rewards(review_id)
+            # 1. 发放评价基础奖励（U2M 按动态配置计算）
+            base_rewards = await IncentiveProcessor._calculate_review_rewards_u2m(review_id)
             if not base_rewards:
                 result['error'] = "计算基础奖励失败"
                 return result
@@ -111,55 +114,45 @@ class IncentiveProcessor:
             return result
 
     @staticmethod
-    async def _calculate_review_base_rewards(review_id: int) -> Optional[Dict[str, int]]:
-        """
-        计算评价基础奖励
-        
-        根据评价质量和完整度计算积分和经验奖励：
-        - 基础奖励：完成评价 = 50积分 + 20经验
-        - 质量奖励：高分评价额外奖励
-        - 完整度奖励：有文字评价额外奖励
-        """
+    async def _calculate_review_rewards_u2m(review_id: int) -> Optional[Dict[str, int]]:
+        """读取 system_config.points_config 并按规则计算 U2M 奖励（积分+经验）。"""
         try:
-            # 获取评价详情
             review = await review_manager.get_review_detail(review_id)
             if not review:
                 logger.error(f"评价不存在: review_id={review_id}")
                 return None
-            
-            # 基础奖励
-            base_points = 50
-            base_xp = 20
-            
-            # 计算评价平均分
-            ratings = [
-                review['rating_appearance'], review['rating_figure'], 
-                review['rating_service'], review['rating_attitude'], review['rating_environment']
-            ]
-            valid_ratings = [r for r in ratings if r is not None and r > 0]
-            
-            if valid_ratings:
-                avg_rating = sum(valid_ratings) / len(valid_ratings)
-                
-                # 高分评价奖励 (8分以上)
-                if avg_rating >= 8.0:
-                    base_points += 25  # 额外25积分
-                    base_xp += 10      # 额外10经验
-                    logger.debug(f"高分评价奖励: avg_rating={avg_rating:.1f}")
-            
-            # 文字评价奖励
-            if review.get('text_review_by_user') and len(review['text_review_by_user'].strip()) >= 10:
-                base_points += 15  # 额外15积分
-                base_xp += 5       # 额外5经验
-                logger.debug("文字评价奖励已加成")
-            
-            return {
-                'points': base_points,
-                'xp': base_xp
-            }
-            
+
+            cfg = await system_config_manager.get_config('points_config', default={}) or {}
+            u2m_cfg = cfg.get('u2m_review', {}) if isinstance(cfg, dict) else {}
+            base_cfg = u2m_cfg.get('base', {})
+            hi_cfg = u2m_cfg.get('high_score_bonus', {})
+            txt_cfg = u2m_cfg.get('text_bonus', {})
+
+            points = int(base_cfg.get('points', 0) or 0)
+            xp = int(base_cfg.get('xp', 0) or 0)
+
+            # 平均分（五维）
+            ratings = [review.get('rating_appearance'), review.get('rating_figure'), review.get('rating_service'), review.get('rating_attitude'), review.get('rating_environment')]
+            valid = [int(r) for r in ratings if isinstance(r, (int, float)) and r is not None]
+            if valid:
+                avg_rating = sum(valid) / len(valid)
+                min_avg = float(hi_cfg.get('min_avg', 999))
+                if avg_rating >= min_avg:
+                    points += int(hi_cfg.get('points', 0) or 0)
+                    xp += int(hi_cfg.get('xp', 0) or 0)
+                    logger.debug(f"U2M 高分加成: avg={avg_rating:.2f} >= {min_avg}")
+
+            # 文字加成
+            text = (review.get('text_review_by_user') or '').strip()
+            min_len = int(txt_cfg.get('min_len', 999) or 999)
+            if len(text) >= min_len:
+                points += int(txt_cfg.get('points', 0) or 0)
+                xp += int(txt_cfg.get('xp', 0) or 0)
+                logger.debug(f"U2M 文字加成 len={len(text)} >= {min_len}")
+
+            return {'points': points, 'xp': xp}
         except Exception as e:
-            logger.error(f"计算评价奖励失败: {e}")
+            logger.error(f"计算U2M评价奖励失败: {e}")
             return None
 
     @staticmethod
@@ -192,26 +185,42 @@ class IncentiveProcessor:
             # 按经验值升序排序
             levels.sort(key=lambda x: x['xp_required'])
             
-            # 找到用户应该达到的等级
-            target_level = None
-            for level in levels:
-                if current_xp >= level['xp_required']:
-                    target_level = level
+            # 当前等级索引与xp
+            current_index = -1
+            current_level_xp = -1
+            for idx, lvl in enumerate(levels):
+                if lvl['level_name'] == current_level:
+                    current_index = idx
+                    current_level_xp = int(lvl['xp_required'])
+                    break
+
+            # 目标等级索引
+            target_index = -1
+            for idx, lvl in enumerate(levels):
+                if current_xp >= int(lvl['xp_required']):
+                    target_index = idx
                 else:
                     break
-            
-            # 检查是否需要升级
-            if target_level and target_level['level_name'] != current_level:
-                # 执行升级
-                await user_manager.update_user_level_and_badges(
-                    user_id=user_id,
-                    new_level_name=target_level['level_name']
-                )
-                
+
+            # 升级并累进发放积分
+            if target_index >= 0 and levels[target_index]['level_name'] != current_level:
+                # 累进发放所有跨越等级的积分奖励
+                points_total = 0
+                start = current_index + 1
+                if start < 0:
+                    start = 0
+                for i in range(start, target_index + 1):
+                    pts = int(levels[i].get('points_on_level_up', 0) or 0)
+                    points_total += max(0, pts)
+                if points_total > 0:
+                    await user_manager.grant_rewards(user_id, xp_to_add=0, points_to_add=points_total)
+
+                new_level = levels[target_index]['level_name']
+                await user_manager.update_user_level_and_badges(user_id=user_id, new_level_name=new_level)
+
                 result['upgraded'] = True
-                result['new_level'] = target_level['level_name']
-                
-                logger.info(f"用户等级升级成功: user_id={user_id}, {current_level} -> {target_level['level_name']} (XP: {current_xp})")
+                result['new_level'] = new_level
+                logger.info(f"用户等级升级成功: user_id={user_id}, {current_level} -> {new_level} (XP: {current_xp})")
             
             return result
             
@@ -275,13 +284,31 @@ class IncentiveProcessor:
                 for trigger in triggers:
                     trigger_type = trigger['trigger_type']
                     trigger_value = trigger['trigger_value']
-                    
-                    user_value = user_stats.get(trigger_type, 0)
-                    if user_value >= trigger_value:
-                        badge_earned = True
+
+                    # 支持 *_min / *_max 以及直接 key 的比较
+                    if trigger_type.endswith('_min'):
+                        key = trigger_type[:-4]
+                        user_value = user_stats.get(key, 0)
+                        if user_value >= trigger_value:
+                            badge_earned = True
+                        else:
+                            badge_earned = False
+                            break
+                    elif trigger_type.endswith('_max'):
+                        key = trigger_type[:-4]
+                        user_value = user_stats.get(key, 0)
+                        if user_value <= trigger_value:
+                            badge_earned = True
+                        else:
+                            badge_earned = False
+                            break
                     else:
-                        badge_earned = False
-                        break  # 任何一个条件不满足就停止检查
+                        user_value = user_stats.get(trigger_type, 0)
+                        if user_value >= trigger_value:
+                            badge_earned = True
+                        else:
+                            badge_earned = False
+                            break
                 
                 # 如果满足条件，授予勋章
                 if badge_earned:
@@ -328,23 +355,30 @@ class IncentiveProcessor:
             completed_orders = [o for o in user_orders if o['status'] in ['已完成', '已评价', '双方评价', '单方评价']]
             stats['order_count'] = len(completed_orders)
             
-            # 获取评价统计
-            user_reviews = []  # 需要实现获取用户评价的方法
-            perfect_reviews = 0
-            for review in user_reviews:
-                # 计算平均评分
-                ratings = [
-                    review.get('rating_appearance', 0), review.get('rating_figure', 0),
-                    review.get('rating_service', 0), review.get('rating_attitude', 0), 
-                    review.get('rating_environment', 0)
-                ]
-                valid_ratings = [r for r in ratings if r > 0]
-                if valid_ratings:
-                    avg_rating = sum(valid_ratings) / len(valid_ratings)
-                    if avg_rating >= 9.5:  # 定义完美评价为9.5分以上
-                        perfect_reviews += 1
-            
-            stats['perfect_reviews'] = perfect_reviews
+            # U2M 被管理员确认的评价数
+            try:
+                row = await db_manager.fetch_one(
+                    "SELECT COUNT(1) AS c FROM reviews WHERE customer_user_id=? AND is_confirmed_by_admin=1 AND is_active=1 AND is_deleted=0",
+                    (user_id,)
+                )
+                stats['u2m_confirmed_reviews'] = int(row['c'] if row else 0)
+            except Exception:
+                stats['u2m_confirmed_reviews'] = 0
+
+            # M2U 聚合数据（来自 user_scores）
+            try:
+                us = await user_scores_manager.get_by_user_id(user_id)
+            except Exception:
+                us = None
+            if us:
+                stats['m2u_reviews'] = int(us.get('total_reviews_count') or 0)
+                stats['m2u_avg_attack_quality'] = float(us.get('avg_attack_quality') or 0.0)
+                stats['m2u_avg_length'] = float(us.get('avg_length') or 0.0)
+                stats['m2u_avg_hardness'] = float(us.get('avg_hardness') or 0.0)
+                stats['m2u_avg_duration'] = float(us.get('avg_duration') or 0.0)
+                stats['m2u_avg_user_temperament'] = float(us.get('avg_user_temperament') or 0.0)
+            else:
+                stats['m2u_reviews'] = 0
             
             # 连续评价天数（简化实现，实际项目中需要更复杂的逻辑）
             stats['consecutive_reviews'] = 0  # TODO: 实现连续评价天数计算
