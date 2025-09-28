@@ -98,6 +98,17 @@ lanyangyang/
     └── database.db     # SQLite数据库文件
 ```
 
+## 🧾 历史文件归档（不参与装配）
+
+为避免旧版/备份代码被误引用，所有不再使用的历史文件已移动至 `docs/archive/legacy/`，仅作留档参考，运行时不会装配：
+
+- web/app.py.backup（旧版应用装配备份）
+- web/routes/users_v2.py、reviews_v2.py、subscription_v2.py、orders_v2.py.old（旧版路由实现）
+- web/services/binding_mgmt_service.py.old（旧版绑定服务）
+- database/db_init.py.backup、db_keywords.py.old、db_merchants.py.old、db_orders.py.old、db_templates.py.old（数据库旧实现/备份）
+
+说明：以上文件仅作为历史参考，不应在任何新代码中 `import`；如果需要查看旧实现，请到 `docs/archive/legacy/` 目录。
+
 ## 🛠️ 本地开发设置
 
 ### 前置条件
