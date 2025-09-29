@@ -24,7 +24,7 @@ async def dashboard(request: Request):
         # 使用统一的页面头部
         Div(
             H1("系统仪表板", cls="page-title"),
-            P(f"数据更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", cls="page-subtitle"),
+            P(f"数据更新时间: { (stats_data.get('last_updated') or '')[:19] }", cls="page-subtitle"),
             cls="page-header"
         ),
         

@@ -142,14 +142,16 @@ class DashboardService:
     async def _get_review_statistics() -> Dict[str, Any]:
         """获取评价统计数据"""
         try:
+            # 统一口径：以 is_confirmed_by_admin=1 AND is_active=1 AND is_deleted=0 为准
             review_total = await review_manager.count_reviews()
             review_avg = await review_manager.get_average_rating()
+            confirmed_count = await review_manager.count_confirmed_reviews()
             
             return {
                 'total': review_total,
                 'average_rating': review_avg,
-                'confirmed_count': await review_manager.count_reviews(status='confirmed'),
-                'pending_count': review_total - await review_manager.count_reviews(status='confirmed')
+                'confirmed_count': confirmed_count,
+                'pending_count': max(0, (review_total or 0) - (confirmed_count or 0))
             }
         except Exception as e:
             logger.error(f"获取评价统计数据失败: {e}")
