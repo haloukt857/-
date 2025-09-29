@@ -150,19 +150,14 @@ async def reviews_list(request: Request):
                 cls="stats-container"
             ),
             
-            # 筛选表单（完整版）
+            # 筛选表单（统一风格：一行多项 + 按钮对齐）
             Form(
                 Div(
                     # 第一行筛选器
                     Div(
                         Div(
                             Label("状态筛选", cls="label"),
-                            okx_select("status", [
-                                ('', '全部状态'),
-                                ('pending_user_review', '待用户评价'),
-                                ('pending_merchant_review', '待商户确认'),
-                                ('completed', '已完成')
-                            ], selected=request.query_params.get('status', ''), cls="select select-bordered w-full"),
+                            okx_select("status", ([("", "全部状态")] + [(k, v) for k, v in (status_options or {}).items()]) if status_options else [("", "全部状态"), ("pending_user_review", "待用户评价"), ("pending_merchant_review", "待商户确认"), ("completed", "已完成")], selected=request.query_params.get('status', ''), cls="select select-bordered w-full"),
                             cls="form-control"
                         ),
                         Div(
@@ -191,7 +186,7 @@ async def reviews_list(request: Request):
                             ], selected=str(per_page), cls="select select-bordered w-full"),
                             cls="form-control"
                         ),
-                        cls="grid grid-cols-1 md:grid-cols-4 gap-4"
+                        cls="flex flex-col md:flex-row md:items-end gap-4 flex-wrap"
                     ),
                     
                     # 第二行：日期范围和搜索
@@ -224,7 +219,7 @@ async def reviews_list(request: Request):
                             ),
                             cls="form-control"
                         ),
-                        cls="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4"
+                        cls="flex flex-col md:flex-row md:items-end gap-4 flex-wrap"
                     ),
                     cls="space-y-4"
                 ),
@@ -316,8 +311,8 @@ async def reviews_list(request: Request):
                                 # 确认状态
                                 Td(
                                     Span(
-                                        "✅ 已确认" if review.get('is_confirmed_by_merchant') else "⏳ 待确认",
-                                        cls="text-xs " + ("text-success" if review.get('is_confirmed_by_merchant') else "text-warning")
+                                        "✅ 已确认" if review.get('is_confirmed_by_admin') else "⏳ 待确认",
+                                        cls="text-xs " + ("text-success" if review.get('is_confirmed_by_admin') else "text-warning")
                                     ),
                                     cls="text-center"
                                 ),
@@ -421,8 +416,8 @@ async def review_detail(request: Request):
                 cls="mb-2"
             ),
             Div(
-                f"确认状态: {'✅ 已确认' if review.get('is_confirmed_by_merchant') else '⏳ 待确认'}", 
-                cls=f"{'text-success' if review.get('is_confirmed_by_merchant') else 'text-warning'} mb-2"
+                f"确认状态: {'✅ 已确认' if review.get('is_confirmed_by_admin') else '⏳ 待确认'}", 
+                cls=f"{'text-success' if review.get('is_confirmed_by_admin') else 'text-warning'} mb-2"
             ),
             Div(f"评价时间: {review.get('created_at', '-')}", cls="text-sm text-gray-500"),
             cls="space-y-3"
@@ -584,7 +579,7 @@ async def export_reviews(request: Request):
                 review.get('rating_environment', ''),
                 review.get('text_review_by_user', ''),
                 review.get('status', ''),
-                '是' if review.get('is_confirmed_by_merchant') else '否',
+                '是' if review.get('is_confirmed_by_admin') else '否',
                 review.get('created_at', '')
             ])
         
