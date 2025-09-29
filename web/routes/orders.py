@@ -115,8 +115,8 @@ async def orders_list(request: Request):
                         Label("状态筛选", cls="label"),
                         Select(
                             Option("全部状态", value="", selected=(status_filter == "")),
-                            *[Option(orders_data.get("status_options", {}).get(status, status), value=status, selected=(status_filter == status))
-                              for status in orders_data.get("status_options", {}).keys()],
+                            *[Option(((orders_data.get("status_options") or OrderMgmtService.STATUS_DISPLAY_MAP)[status]), value=status, selected=(status_filter == status))
+                              for status in (orders_data.get("status_options") or OrderMgmtService.STATUS_DISPLAY_MAP).keys()],
                             name="status", cls="select select-bordered w-full"
                         ),
                         cls="form-control min-w-[180px]"
