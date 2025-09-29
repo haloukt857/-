@@ -107,62 +107,61 @@ async def orders_list(request: Request):
                 cls="stats shadow mb-6"
             ),
             
-            # 搜索筛选表单（对齐旧版：状态+商户+客户+日期）
+            # 搜索筛选表单（统一风格：一行多项+按钮对齐）
             Form(
                 Div(
+                    # 状态筛选
                     Div(
                         Label("状态筛选", cls="label"),
                         Select(
                             Option("全部状态", value="", selected=(status_filter == "")),
-                            *[Option(orders_data["status_options"][status], value=status, 
-                                   selected=(status_filter == status))
-                              for status in orders_data["status_options"].keys()],
+                            *[Option(orders_data.get("status_options", {}).get(status, status), value=status, selected=(status_filter == status))
+                              for status in orders_data.get("status_options", {}).keys()],
                             name="status", cls="select select-bordered w-full"
                         ),
-                        cls="form-control"
+                        cls="form-control min-w-[180px]"
                     ),
+                    # 商户筛选
                     Div(
                         Label("商户筛选", cls="label"),
                         Select(
                             Option("全部商户", value="", selected=(merchant_filter == "")),
-                            *[Option(f"#{merchant['id']} - {merchant.get('name', '未设置')}", 
-                                   value=str(merchant['id']),
-                                   selected=(merchant_filter == str(merchant['id'])))
-                              for merchant in merchants[:50]],  # 限制选项数量
+                            *[Option(f"#{merchant['id']} - {merchant.get('name', '未设置')}", value=str(merchant['id']), selected=(merchant_filter == str(merchant['id']))) for merchant in merchants[:50]],
                             name="merchant_id", cls="select select-bordered w-full"
                         ),
-                        cls="form-control"
+                        cls="form-control min-w-[220px]"
                     ),
+                    # 客户筛选
                     Div(
                         Label("客户筛选", cls="label"),
                         Select(
                             Option("全部客户", value="", selected=(customer_filter == "")),
-                            *[Option(f"#{user['user_id']} - {user.get('username', '未设置')}", 
-                                   value=str(user['user_id']),
-                                   selected=(customer_filter == str(user['user_id'])))
-                              for user in users[:50]],  # 限制选项数量 
+                            *[Option(f"#{user['user_id']} - {user.get('username', '未设置')}", value=str(user['user_id']), selected=(customer_filter == str(user['user_id']))) for user in users[:50]],
                             name="customer_id", cls="select select-bordered w-full"
                         ),
-                        cls="form-control"
+                        cls="form-control min-w-[220px]"
                     ),
+                    # 日期区间
                     Div(
-                        Label("开始日期", cls="label"),
-                        Input(type="date", name="date_from", value=date_from,
-                              cls="input input-bordered w-full"),
-                        cls="form-control"
+                        Label("起止日期", cls="label"),
+                        Div(
+                            Input(type="date", name="date_from", value=date_from, cls="input input-bordered"),
+                            Span("-", cls="mx-2"),
+                            Input(type="date", name="date_to", value=date_to, cls="input input-bordered"),
+                            cls="flex items-center"
+                        ),
+                        cls="form-control min-w-[260px]"
                     ),
+                    # 按钮
                     Div(
-                        Label("结束日期", cls="label"),
-                        Input(type="date", name="date_to", value=date_to,
-                              cls="input input-bordered w-full"),
-                        cls="form-control"
+                        Div(
+                            Button("搜索", type="submit", cls="btn btn-primary"),
+                            A("重置", href="/orders", cls="btn btn-ghost ml-2"),
+                            cls="flex gap-2"
+                        ),
+                        cls="form-control md:self-end"
                     ),
-                    Div(
-                        Button("搜索", type="submit", cls="btn btn-primary"),
-                        A("重置", href="/orders", cls="btn btn-ghost ml-2"),
-                        cls="form-control mt-4 col-span-full"
-                    ),
-                    cls="grid grid-cols-1 md:grid-cols-3 gap-4"
+                    cls="flex flex-col md:flex-row md:items-end gap-4 flex-wrap"
                 ),
                 method="GET",
                 action="/orders",
@@ -232,9 +231,9 @@ async def orders_list(request: Request):
                                         A("详情", href=f"/orders/{order.get('id')}", cls="btn btn-sm btn-info mr-1"),
                                         # 快速操作按钮（根据状态显示）
                                         *([A("完成", href=f"/orders/{order.get('id')}/complete", cls="btn btn-sm btn-success mr-1")] 
-                                          if order.get('status') == 'attempt_booking' else []),
+                                          if order.get('status') == '尝试预约' else []),
                                         *([A("标记评价", href=f"/orders/{order.get('id')}/mark_reviewed", cls="btn btn-sm btn-warning mr-1")] 
-                                          if order.get('status') == 'completed' else []),
+                                          if order.get('status') == '已完成' else []),
                                         A("取消", href=f"/orders/{order.get('id')}/cancel", cls="btn btn-sm btn-error"),
                                         cls="flex gap-1 flex-wrap"
                                     )

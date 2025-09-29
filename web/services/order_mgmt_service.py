@@ -32,27 +32,27 @@ class OrderMgmtService:
     
     # 订单状态映射（与旧版orders_routes_v2.py保持一致）
     STATUS_DISPLAY_MAP = {
-        "attempt_booking": "尝试预约",
-        "completed": "已完成", 
-        "reviewed": "已评价",
-        "mutual_review": "双方评价",
-        "single_review": "单方评价"
+        "尝试预约": "尝试预约",
+        "已完成": "已完成",
+        "已评价": "已评价",
+        "双方评价": "双方评价",
+        "单方评价": "单方评价",
     }
     
     STATUS_COLORS = {
-        "attempt_booking": "badge-warning",
-        "completed": "badge-success", 
-        "reviewed": "badge-info",
-        "mutual_review": "badge-primary",
-        "single_review": "badge-secondary"
+        "尝试预约": "badge-warning",
+        "已完成": "badge-success",
+        "已评价": "badge-info",
+        "双方评价": "badge-primary",
+        "单方评价": "badge-secondary",
     }
     
     STATUS_ICONS = {
-        "attempt_booking": "⏳",
-        "completed": "✅",
-        "reviewed": "⭐", 
-        "mutual_review": "🤝",
-        "single_review": "📝"
+        "尝试预约": "⏳",
+        "已完成": "✅",
+        "已评价": "⭐",
+        "双方评价": "🤝",
+        "单方评价": "📝",
     }
     
     @staticmethod
