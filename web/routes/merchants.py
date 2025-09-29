@@ -10,7 +10,10 @@ from typing import Any
 from starlette.requests import Request
 
 # 导入布局和认证组件
-from ..layout import create_layout, require_auth
+from ..layout import (
+    create_layout, require_auth,
+    get_or_create_csrf_token, validate_csrf
+)
 from ..services.merchant_mgmt_service import MerchantMgmtService
 from utils.enums import MERCHANT_STATUS
 
@@ -188,14 +191,14 @@ async def merchants_list(request: Request):
                                             ))(merchant.get('status', 'unknown'))
                                         , cls="px-2 py-1 text-sm whitespace-nowrap"),
                                         Td(merchant.get('created_at', '-'), cls="px-2 py-1 text-sm whitespace-nowrap"),
-                                        Td(
-                                            Div(
-                                                A("查看", href=f"/posts/{merchant.get('id')}", cls="btn btn-xs btn-info"),
-                                                A("编辑", href=f"/posts/{merchant.get('id')}?mode=edit", cls="btn btn-xs btn-secondary ml-1"),
-                                                cls="flex justify-end"
-                                            )
-                                        )
+                                Td(
+                                    Div(
+                                        A("详情", href=f"/merchants/{merchant.get('id')}/detail", cls="btn btn-xs btn-info"),
+                                        A("帖子管理", href=f"/posts/{merchant.get('id')}", cls="btn btn-xs btn-secondary ml-1"),
+                                        cls="flex justify-end"
                                     )
+                                )
+                            )
                                     for merchant in merchants
                                 ] if merchants else [
                                     Tr(
@@ -229,6 +232,174 @@ async def merchants_list(request: Request):
             Pre(f"{str(e)}\n\n{traceback.format_exc()}", cls="bg-gray-100 p-4 rounded text-sm")
         )
         return create_layout("系统错误", error_content)
+
+
+@require_auth
+async def merchant_detail(request: Request):
+    """商户只读详情页（管理动作以最小按钮形式提供）。"""
+    merchant_id = int(request.path_params.get('merchant_id'))
+    try:
+        data = await MerchantMgmtService.get_merchant_detail(merchant_id)
+        if not data.get('success'):
+            return create_layout(
+                "商户不存在",
+                Div(H2("商户不存在", cls="text-2xl font-bold text-red-600 mb-4"), A("返回列表", href="/merchants", cls="btn btn-primary"))
+            )
+
+        merchant = data.get('merchant') or {}
+        order_stats = data.get('order_stats') or {}
+        review_stats = data.get('review_stats') or {}
+
+        # 生成 CSRF token
+        csrf = get_or_create_csrf_token(request)
+
+        # 基本信息块
+        base_info = Div(
+            H3("基本信息", cls="text-xl font-semibold mb-3"),
+            Table(
+                Tbody(
+                    Tr(Th("商户ID"), Td(str(merchant.get('id', '-')))),
+                    Tr(Th("名称"), Td(merchant.get('name', '-') or '-')),
+                    Tr(Th("联系方式"), Td(merchant.get('contact_info', '-') or '-')),
+                    Tr(Th("地区"), Td(f"{merchant.get('city_name', '-') } - { merchant.get('district_name', '-') }")),
+                    Tr(Th("价格"), Td(f"P: {merchant.get('p_price', '-') or '-'} / PP: {merchant.get('pp_price', '-') or '-'}")),
+                    Tr(Th("一句话优势"), Td(merchant.get('adv_sentence', '-') or '-')),
+                ),
+                cls="table table-compact w-full"
+            ),
+            cls="card bg-base-100 shadow p-4"
+        )
+
+        # 渠道与时间
+        channel_info = Div(
+            H3("频道与时间", cls="text-xl font-semibold mb-3"),
+            Table(
+                Tbody(
+                    Tr(Th("频道用户名/ID"), Td(merchant.get('channel_chat_id', '-') or '-')),
+                    Tr(Th("频道链接"), Td(A(merchant.get('channel_link') or '-', href=merchant.get('channel_link') or '#', cls="link",
+                                       **({} if merchant.get('channel_link') else {"onclick": "return false;"})))),
+                    Tr(Th("状态"), Td(Span(MERCHANT_STATUS.get_display_name(merchant.get('status','unknown')), cls=f"badge {MERCHANT_STATUS.get_badge_class(merchant.get('status','unknown'))}"))),
+                    Tr(Th("发布时间"), Td(merchant.get('publish_time', '-') or '-')),
+                    Tr(Th("到期时间"), Td(merchant.get('expiration_time', '-') or '-')),
+                )
+            ),
+            cls="card bg-base-100 shadow p-4"
+        )
+
+        # 统计
+        stats = Div(
+            H3("统计", cls="text-xl font-semibold mb-3"),
+            Div(
+                Div(Div("订单总数", cls="stat-title"), Div(str(order_stats.get('total_orders', 0)), cls="stat-value"), cls="stat"),
+                Div(Div("已完成订单", cls="stat-title"), Div(str(order_stats.get('completed_orders', 0)), cls="stat-value text-success"), cls="stat"),
+                Div(Div("评价总数", cls="stat-title"), Div(str(review_stats.get('total_reviews', 0)), cls="stat-value"), cls="stat"),
+                cls="stats shadow"
+            ),
+            cls="card bg-base-100 shadow p-4"
+        )
+
+        # 管理动作（前端层：状态更新/刷新信息）
+        current_status = str(merchant.get('status') or '')
+        # 根据当前状态给出最小动作
+        actions = []
+        # 审核通过
+        if current_status in {MERCHANT_STATUS.PENDING_SUBMISSION.value, MERCHANT_STATUS.PENDING_APPROVAL.value}:
+            actions.append(
+                Form(
+                    Input(type="hidden", name="csrf_token", value=csrf),
+                    Input(type="hidden", name="new_status", value=MERCHANT_STATUS.APPROVED.value),
+                    Button("审核通过", type="submit", cls="btn btn-success btn-sm"),
+                    method="post", action=f"/merchants/{merchant_id}/status"
+                )
+            )
+        # 立即发布
+        if current_status == MERCHANT_STATUS.APPROVED.value:
+            actions.append(
+                Form(
+                    Input(type="hidden", name="csrf_token", value=csrf),
+                    Input(type="hidden", name="new_status", value=MERCHANT_STATUS.PUBLISHED.value),
+                    Button("立即发布", type="submit", cls="btn btn-info btn-sm"),
+                    method="post", action=f"/merchants/{merchant_id}/status"
+                )
+            )
+        # 设为过期
+        if current_status == MERCHANT_STATUS.PUBLISHED.value:
+            actions.append(
+                Form(
+                    Input(type="hidden", name="csrf_token", value=csrf),
+                    Input(type="hidden", name="new_status", value=MERCHANT_STATUS.EXPIRED.value),
+                    Button("设为过期", type="submit", cls="btn btn-warning btn-sm"),
+                    method="post", action=f"/merchants/{merchant_id}/status"
+                )
+            )
+
+        # 刷新Telegram资料
+        actions.append(
+            Form(
+                Input(type="hidden", name="csrf_token", value=csrf),
+                Button("刷新用户信息", type="submit", cls="btn btn-secondary btn-sm"),
+                method="post", action=f"/merchants/{merchant_id}/refresh"
+            )
+        )
+
+        actions_bar = Div(*actions, A("返回列表", href="/merchants", cls="btn btn-ghost btn-sm ml-2"), cls="flex gap-2 justify-end")
+
+        content = Div(
+            Div(H1("商户详情", cls="page-title"), P(f"ID: {merchant_id}", cls="page-subtitle"), cls="page-header"),
+            Div(base_info, channel_info, stats, actions_bar, cls="space-y-4"),
+            cls="page-content"
+        )
+        return create_layout("商户详情", content)
+    except Exception as e:
+        logger.error(f"商户详情页面错误: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return create_layout("错误", Div(P("加载失败"), P(str(e), cls="text-error")))
+
+
+@require_auth
+async def merchant_update_status(request: Request):
+    """商户状态更新（POST + CSRF，前端层调用服务层批量接口）。"""
+    merchant_id = int(request.path_params.get('merchant_id'))
+    form = await request.form()
+    try:
+        if not validate_csrf(request, form.get('csrf_token', '')):
+            from starlette.responses import RedirectResponse
+            return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=csrf", status_code=302)
+        new_status = str(form.get('new_status') or '').strip()
+        if not new_status:
+            from starlette.responses import RedirectResponse
+            return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=empty_status", status_code=302)
+
+        result = await MerchantMgmtService.batch_update_status([merchant_id], new_status)
+        from starlette.responses import RedirectResponse
+        if result.get('success'):
+            return RedirectResponse(url=f"/merchants/{merchant_id}/detail?updated=1", status_code=302)
+        return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=update_failed", status_code=302)
+    except Exception as e:
+        logger.error(f"更新商户状态失败: {e}")
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=exception", status_code=302)
+
+
+@require_auth
+async def merchant_refresh_info(request: Request):
+    """刷新商户Telegram资料（POST + CSRF）。"""
+    merchant_id = int(request.path_params.get('merchant_id'))
+    form = await request.form()
+    try:
+        if not validate_csrf(request, form.get('csrf_token', '')):
+            from starlette.responses import RedirectResponse
+            return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=csrf", status_code=302)
+        result = await MerchantMgmtService.refresh_user_info(merchant_id)
+        from starlette.responses import RedirectResponse
+        if result.get('success'):
+            return RedirectResponse(url=f"/merchants/{merchant_id}/detail?refreshed=1", status_code=302)
+        return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=refresh_failed", status_code=302)
+    except Exception as e:
+        logger.error(f"刷新商户信息失败: {e}")
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=exception", status_code=302)
 
 
 def _generate_pagination(current_page: int, total_pages: int, query_params, per_page: int, total_items: int) -> Any:
