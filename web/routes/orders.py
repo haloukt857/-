@@ -121,24 +121,26 @@ async def orders_list(request: Request):
                         ),
                         cls="form-control min-w-[180px]"
                     ),
-                    # 商户筛选
+                    # 商户筛选（下拉 + 可选ID输入，兼容无列表数据）
                     Div(
                         Label("商户筛选", cls="label"),
                         Select(
                             Option("全部商户", value="", selected=(merchant_filter == "")),
-                            *[Option(f"#{merchant['id']} - {merchant.get('name', '未设置')}", value=str(merchant['id']), selected=(merchant_filter == str(merchant['id']))) for merchant in merchants[:50]],
-                            name="merchant_id", cls="select select-bordered w-full"
+                            *([Option(f"#{m['id']} - {m.get('name', '未设置')}", value=str(m['id']), selected=(merchant_filter == str(m['id']))) for m in merchants[:50]] if merchants else [Option("暂无商户", value="", selected=True)]),
+                            name="merchant_id", cls="select select-bordered w-full mb-2"
                         ),
+                        Input(name="merchant_id", value=merchant_filter, placeholder="或输入精确ID", cls="input input-bordered w-full"),
                         cls="form-control min-w-[220px]"
                     ),
-                    # 客户筛选
+                    # 客户筛选（下拉 + 可选ID输入，兼容无列表数据）
                     Div(
                         Label("客户筛选", cls="label"),
                         Select(
                             Option("全部客户", value="", selected=(customer_filter == "")),
-                            *[Option(f"#{user['user_id']} - {user.get('username', '未设置')}", value=str(user['user_id']), selected=(customer_filter == str(user['user_id']))) for user in users[:50]],
-                            name="customer_id", cls="select select-bordered w-full"
+                            *([Option(f"#{u['user_id']} - {u.get('username', '未设置')}", value=str(u['user_id']), selected=(customer_filter == str(u['user_id']))) for u in users[:50]] if users else [Option("暂无客户", value="", selected=True)]),
+                            name="customer_id", cls="select select-bordered w-full mb-2"
                         ),
+                        Input(name="customer_id", value=customer_filter, placeholder="或输入精确ID", cls="input input-bordered w-full"),
                         cls="form-control min-w-[220px]"
                     ),
                     # 日期区间
