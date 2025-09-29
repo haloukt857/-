@@ -203,22 +203,22 @@ async def posts_list(request: Request):
         pagination = posts_data["pagination"]
         regions = posts_data.get("regions", [])
         
-        # 构建筛选表单（与商户管理风格一致：一行四项+按钮对齐）
+        # 构建筛选表单（单行横向，紧凑控件，窄屏自动换行）
         filter_form = Form(
             Div(
-                # 状态筛选（使用服务层提供的映射，避免前后端不一致）
+                # 状态筛选（优先服务层映射）
                 Div(
-                    Label("状态筛选:", cls="label"),
+                    Label("状态筛选", cls="label"),
                     Select(
                         Option("全部状态", value="", selected=not status_filter),
                         *[Option(posts_data.get('status_options', {}).get(k, k), value=k, selected=(status_filter==k)) for k in posts_data.get('status_options', {}).keys()],
                         name="status", cls="select select-bordered w-full"
                     ),
-                    cls="form-control min-w-[200px]"
+                    cls="form-control min-w-[140px]"
                 ),
                 # 区县筛选
                 Div(
-                    Label("区县筛选:", cls="label"),
+                    Label("区县筛选", cls="label"),
                     Select(
                         Option("全部地区", value="", selected=not district_filter),
                         *[Option(f"{region.get('city_name', '')} - {region.get('name', '')}", 
@@ -227,39 +227,39 @@ async def posts_list(request: Request):
                           for region in regions],
                         name="district", cls="select select-bordered w-full"
                     ),
-                    cls="form-control min-w-[240px]"
+                    cls="form-control min-w-[180px]"
                 ),
                 # 搜索框
                 Div(
-                    Label("搜索:", cls="label"),
+                    Label("搜索", cls="label"),
                     Input(type="text", name="search", value=search_query,
                           placeholder="搜索商户名称或用户名", cls="input input-bordered w-full"),
-                    cls="form-control flex-1"
+                    cls="form-control min-w-[220px] flex-1"
                 ),
                 # 排序选择
                 Div(
-                    Label("排序:", cls="label"),
+                    Label("排序", cls="label"),
                     Select(
                         Option("创建时间", value="created_at", selected=sort_by=="created_at"),
                         Option("更新时间", value="updated_at", selected=sort_by=="updated_at"),
                         Option("发布时间", value="publish_time", selected=sort_by=="publish_time"),
                         name="sort", cls="select select-bordered w-full"
                     ),
-                    cls="form-control min-w-[180px]"
+                    cls="form-control min-w-[140px]"
                 ),
                 # 按钮
                 Div(
                     Div(
-                        Button("搜索", type="submit", cls="btn btn-primary"),
-                        A("重置", href="/posts", cls="btn btn-ghost ml-2"),
+                        Button("搜索", type="submit", cls="btn btn-primary btn-sm"),
+                        A("重置", href="/posts", cls="btn btn-outline btn-sm ml-2"),
                         cls="flex gap-2"
                     ),
-                    cls="form-control md:self-end"
+                    cls="form-control"
                 ),
-                cls="flex flex-col md:flex-row md:items-end gap-4"
+                cls="flex items-end gap-3 flex-wrap"
             ),
             method="get",
-            cls="card bg-base-100 shadow-xl p-6 mb-6"
+            cls="card bg-base-100 shadow-xl p-4 mb-6"
         )
         
         # 构建帖子表格

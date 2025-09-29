@@ -21,64 +21,64 @@ logger = logging.getLogger(__name__)
 async def user_analytics_dashboard(request: Request):
     """用户激励系统分析仪表板"""
     
-    # 图表容器（只输出6个canvas容器，不内嵌数据）
+    # 图表容器（响应式更紧凑：单一网格，最多三列，同时降低图表高度）
     charts_section = Div(
-        # 第一行图表
+        # 1/6 等级分布
         Div(
-            # 用户等级分布饼图
+            H3("📊 用户等级分布", cls="text-sm font-semibold mb-2"),
             Div(
-                H3("📊 用户等级分布", cls="content-section-title"),
-                Canvas(id="levelDistributionChart", width="400", height="200"),
-                cls="content-section"
+                Canvas(id="levelDistributionChart", cls="absolute inset-0"),
+                cls="relative h-full"
             ),
-            
-            # 用户活跃度趋势
-            Div(
-                H3("📈 用户活跃度趋势 (近30天)", cls="content-section-title"),
-                Canvas(id="userActivityChart", width="400", height="200"),
-                cls="content-section"
-            ),
-            
-            cls="content-grid grid-2"
+            cls="card bg-base-100 shadow p-3 h-full"
         ),
-        
-        # 第二行图表
+        # 2/6 活跃趋势
         Div(
-            # 热门勋章排行
+            H3("📈 活跃度趋势(30天)", cls="text-sm font-semibold mb-2"),
             Div(
-                H3("🏆 热门勋章排行 (Top 10)", cls="content-section-title"),
-                Canvas(id="popularBadgesChart", width="400", height="300"),
-                cls="content-section"
+                Canvas(id="userActivityChart", cls="absolute inset-0"),
+                cls="relative h-full"
             ),
-            
-            # 积分分布柱状图
-            Div(
-                H3("💰 用户积分分布", cls="content-section-title"),
-                Canvas(id="pointsDistributionChart", width="400", height="300"), 
-                cls="content-section"
-            ),
-            
-            cls="content-grid grid-2"
+            cls="card bg-base-100 shadow p-3 h-full"
         ),
-        
-        # 第三行图表
+        # 3/6 热门勋章
         Div(
-            # 评价活跃度
+            H3("🏆 热门勋章(Top10)", cls="text-sm font-semibold mb-2"),
             Div(
-                H3("⭐ 评价活跃度统计", cls="content-section-title"),
-                Canvas(id="reviewActivityChart", width="400", height="250"),
-                cls="content-section"
+                Canvas(id="popularBadgesChart", cls="absolute inset-0"),
+                cls="relative h-full"
             ),
-            
-            # 用户成长轨迹
+            cls="card bg-base-100 shadow p-3 h-full"
+        ),
+        # 4/6 积分分布
+        Div(
+            H3("💰 积分分布", cls="text-sm font-semibold mb-2"),
             Div(
-                H3("📈 用户成长轨迹 (经验值分布)", cls="content-section-title"),
-                Canvas(id="userGrowthChart", width="400", height="250"),
-                cls="content-section"
+                Canvas(id="pointsDistributionChart", cls="absolute inset-0"),
+                cls="relative h-full"
             ),
-            
-            cls="content-grid grid-2"
-        )
+            cls="card bg-base-100 shadow p-3 h-full"
+        ),
+        # 5/6 评价活跃度
+        Div(
+            H3("⭐ 评价活跃度(7天)", cls="text-sm font-semibold mb-2"),
+            Div(
+                Canvas(id="reviewActivityChart", cls="absolute inset-0"),
+                cls="relative h-full"
+            ),
+            cls="card bg-base-100 shadow p-3 h-full"
+        ),
+        # 6/6 成长轨迹（经验分布）
+        Div(
+            H3("📈 成长轨迹(经验分布)", cls="text-sm font-semibold mb-2"),
+            Div(
+                Canvas(id="userGrowthChart", cls="absolute inset-0"),
+                cls="relative h-full"
+            ),
+            cls="card bg-base-100 shadow p-3 h-full"
+        ),
+        cls="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4",
+        style="grid-auto-rows: minmax(18rem, 1fr);"
     )
     
     # Chart.js初始化脚本 - 通过fetch获取数据
@@ -92,6 +92,30 @@ async def user_analytics_dashboard(request: Request):
             }
             const analyticsData = await res.json();
             console.log('Analytics data loaded:', analyticsData);
+            
+            // 辅助：整数刻度轴配置（避免0-0.5-1缩略）
+            function getMaxTicksByWidth(container){
+                try {
+                    const w = (container && container.clientWidth) ? container.clientWidth : window.innerWidth;
+                    if (w >= 1280) return 8;
+                    if (w >= 1024) return 7;
+                    if (w >= 768) return 6;
+                    return 5;
+                } catch (_) { return 6; }
+            }
+
+            function intAxisCfg(arr, container){
+                const data = Array.isArray(arr) ? arr.map(Number).filter(v=>!isNaN(v)) : [];
+                const max = Math.max(0, ...data, 0);
+                const suggested = max === 0 ? 10 : Math.ceil(max * 1.2);
+                const maxTicks = getMaxTicksByWidth(container);
+                const step = Math.max(1, Math.ceil(suggested / maxTicks));
+                return {
+                    beginAtZero: true,
+                    suggestedMax: suggested,
+                    ticks: { stepSize: step, precision: 0, maxTicksLimit: maxTicks, autoSkip: true, callback: (v)=>Math.floor(v) }
+                };
+            }
             
             // 1. 用户等级分布饼图
             const levelCtx = document.getElementById('levelDistributionChart');
@@ -111,8 +135,11 @@ async def user_analytics_dashboard(request: Request):
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
+                        resizeDelay: 200,
+                        animation: false,
                         plugins: {
-                            legend: { position: 'right' },
+                            legend: { position: 'bottom' },
                             tooltip: {
                                 callbacks: {
                                     label: function(context) {
@@ -132,6 +159,7 @@ async def user_analytics_dashboard(request: Request):
             // 2. 用户活跃度趋势折线图
             const activityCtx = document.getElementById('userActivityChart');
             if (activityCtx) {
+                const activityWrap = activityCtx.parentElement;
                 new Chart(activityCtx.getContext('2d'), {
                     type: 'line',
                     data: {
@@ -147,11 +175,12 @@ async def user_analytics_dashboard(request: Request):
                     },
                     options: {
                         responsive: true,
-                        scales: {
-                            y: { beginAtZero: true }
-                        },
+                        maintainAspectRatio: false,
+                        resizeDelay: 200,
+                        animation: false,
+                        scales: { y: intAxisCfg(analyticsData.activity_counts || [], activityWrap) },
                         plugins: {
-                            legend: { position: 'top' }
+                            legend: { position: 'bottom' }
                         }
                     }
                 });
@@ -161,6 +190,7 @@ async def user_analytics_dashboard(request: Request):
             // 3. 热门勋章排行横向条形图
             const badgesCtx = document.getElementById('popularBadgesChart');
             if (badgesCtx) {
+                const badgesWrap = badgesCtx.parentElement;
                 new Chart(badgesCtx.getContext('2d'), {
                     type: 'bar',
                     data: {
@@ -177,12 +207,11 @@ async def user_analytics_dashboard(request: Request):
                     options: {
                         indexAxis: 'y',
                         responsive: true,
-                        scales: {
-                            x: { beginAtZero: true }
-                        },
-                        plugins: {
-                            legend: { display: false }
-                        }
+                        maintainAspectRatio: false,
+                        resizeDelay: 200,
+                        animation: false,
+                        scales: { x: intAxisCfg(analyticsData.badge_counts || [], badgesWrap) },
+                        plugins: { legend: { display: false } }
                     }
                 });
                 console.log('Popular badges chart initialized');
@@ -191,6 +220,7 @@ async def user_analytics_dashboard(request: Request):
             // 4. 用户积分分布柱状图
             const pointsCtx = document.getElementById('pointsDistributionChart');
             if (pointsCtx) {
+                const pointsWrap = pointsCtx.parentElement;
                 new Chart(pointsCtx.getContext('2d'), {
                     type: 'bar',
                     data: {
@@ -205,12 +235,11 @@ async def user_analytics_dashboard(request: Request):
                     },
                     options: {
                         responsive: true,
-                        scales: {
-                            y: { beginAtZero: true }
-                        },
-                        plugins: {
-                            legend: { position: 'top' }
-                        }
+                        maintainAspectRatio: false,
+                        resizeDelay: 200,
+                        animation: false,
+                        scales: { y: intAxisCfg(analyticsData.points_counts || [], pointsWrap) },
+                        plugins: { legend: { position: 'bottom' } }
                     }
                 });
                 console.log('Points distribution chart initialized');
@@ -219,6 +248,7 @@ async def user_analytics_dashboard(request: Request):
             // 5. 评价活跃度统计折线图
             const reviewCtx = document.getElementById('reviewActivityChart');
             if (reviewCtx) {
+                const reviewWrap = reviewCtx.parentElement;
                 new Chart(reviewCtx.getContext('2d'), {
                     type: 'line',
                     data: {
@@ -234,12 +264,11 @@ async def user_analytics_dashboard(request: Request):
                     },
                     options: {
                         responsive: true,
-                        scales: {
-                            y: { beginAtZero: true }
-                        },
-                        plugins: {
-                            legend: { position: 'top' }
-                        }
+                        maintainAspectRatio: false,
+                        resizeDelay: 200,
+                        animation: false,
+                        scales: { y: intAxisCfg(analyticsData.review_activity_counts || [], reviewWrap) },
+                        plugins: { legend: { position: 'bottom' } }
                     }
                 });
                 console.log('Review activity chart initialized');
@@ -248,6 +277,7 @@ async def user_analytics_dashboard(request: Request):
             // 6. 用户成长轨迹柱状图 (经验值分布)
             const growthCtx = document.getElementById('userGrowthChart');
             if (growthCtx) {
+                const growthWrap = growthCtx.parentElement;
                 new Chart(growthCtx.getContext('2d'), {
                     type: 'bar',
                     data: {
@@ -262,12 +292,11 @@ async def user_analytics_dashboard(request: Request):
                     },
                     options: {
                         responsive: true,
-                        scales: {
-                            y: { beginAtZero: true }
-                        },
-                        plugins: {
-                            legend: { position: 'top' }
-                        }
+                        maintainAspectRatio: false,
+                        resizeDelay: 200,
+                        animation: false,
+                        scales: { y: intAxisCfg(analyticsData.xp_counts || [], growthWrap) },
+                        plugins: { legend: { position: 'bottom' } }
                     }
                 });
                 console.log('User growth chart initialized');
@@ -290,24 +319,26 @@ async def user_analytics_dashboard(request: Request):
     """
     
     content = Div(
-        # 页面头部
+        # 紧凑页头（减少垂直占位）
         Div(
-            H1("用户激励系统数据分析", cls="page-title"),
-            P("可视化展示用户行为、等级分布、勋章获取等数据", cls="page-subtitle"),
-            cls="page-header"
+            Div(
+                H2("用户分析", cls="text-xl font-semibold"),
+                P("等级分布、活跃趋势、勋章与积分概览", cls="text-xs text-gray-500 mt-1"),
+                cls=""
+            ),
+            Div(
+                A("返回用户管理", href="/users", cls="btn btn-outline btn-xs"),
+                A("返回激励管理", href="/incentives", cls="btn btn-outline btn-xs ml-2"),
+                cls=""
+            ),
+            cls="flex items-center justify-between mb-2"
         ),
-        
-        # 导航链接
-        Div(
-            A("← 返回用户管理", href="/users", cls="btn btn-outline"),
-            A("← 返回激励管理", href="/incentives", cls="btn btn-outline ml-2"),
-            cls="mb-6"
-        ),
-        
+
         charts_section,
         Script(chart_script_content),  # Chart.js初始化脚本
         
-        cls="page-content"
+        cls="page-content",
+        style="min-height: calc(100vh - 80px);"
     )
     
     return create_layout("用户数据分析", content, include_charts=True)

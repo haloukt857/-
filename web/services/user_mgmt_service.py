@@ -373,11 +373,35 @@ class UserMgmtService:
     async def _get_user_order_stats(user_id: int) -> Dict[str, Any]:
         """获取用户订单统计"""
         try:
-            # TODO: 实现用户订单统计逻辑
+            from database.db_connection import db_manager
+            # 总订单
+            row_total = await db_manager.fetch_one(
+                "SELECT COUNT(*) AS c FROM orders WHERE customer_user_id = ?",
+                (user_id,)
+            )
+            total = int(row_total['c'] if row_total else 0)
+
+            # 已完成相关（含已评价/双方评价/单方评价）
+            row_completed = await db_manager.fetch_one(
+                """
+                SELECT COUNT(*) AS c FROM orders 
+                WHERE customer_user_id = ? AND status IN ('已完成','已评价','双方评价','单方评价')
+                """,
+                (user_id,)
+            )
+            completed = int(row_completed['c'] if row_completed else 0)
+
+            # 待处理（尝试预约）
+            row_pending = await db_manager.fetch_one(
+                "SELECT COUNT(*) AS c FROM orders WHERE customer_user_id = ? AND status = '尝试预约'",
+                (user_id,)
+            )
+            pending = int(row_pending['c'] if row_pending else 0)
+
             return {
-                'total_orders': 0,
-                'completed_orders': 0,
-                'pending_orders': 0
+                'total_orders': total,
+                'completed_orders': completed,
+                'pending_orders': pending
             }
         except Exception as e:
             logger.error(f"获取用户订单统计失败: user_id={user_id}, error={e}")
@@ -387,11 +411,49 @@ class UserMgmtService:
     async def _get_user_review_stats(user_id: int) -> Dict[str, Any]:
         """获取用户评价统计"""
         try:
-            # TODO: 实现用户评价统计逻辑
+            from database.db_connection import db_manager
+            from database.db_user_scores import user_scores_manager
+
+            # 用户给出的评价（u2m）：直接统计 reviews 表
+            rows = await db_manager.fetch_all(
+                """
+                SELECT rating_appearance, rating_figure, rating_service, rating_attitude, rating_environment
+                FROM reviews
+                WHERE customer_user_id = ?
+                """,
+                (user_id,)
+            )
+            total_reviews = len(rows or [])
+            # 平均打分（按每条的五维平均，再整体平均；忽略空值）
+            def row_avg(r):
+                vals = [r.get('rating_appearance'), r.get('rating_figure'), r.get('rating_service'), r.get('rating_attitude'), r.get('rating_environment')]
+                nums = [float(v) for v in vals if v is not None]
+                return sum(nums) / len(nums) if nums else None
+
+            per_review_avgs = [row_avg(dict(row)) for row in (rows or [])]
+            cleaned = [v for v in per_review_avgs if v is not None]
+            average_given = round(sum(cleaned) / len(cleaned), 2) if cleaned else 0.0
+
+            # 用户被商户评价（m2u）：来自聚合表 user_scores（若存在则取五维平均的均值）
+            us = await user_scores_manager.get_by_user_id(user_id)
+            if us:
+                dims = [
+                    float(us.get('avg_attack_quality') or 0.0),
+                    float(us.get('avg_length') or 0.0),
+                    float(us.get('avg_hardness') or 0.0),
+                    float(us.get('avg_duration') or 0.0),
+                    float(us.get('avg_user_temperament') or 0.0),
+                ]
+                # 仅在存在有效样本时计算
+                cnt = int(us.get('total_reviews_count') or 0)
+                average_received = round(sum(dims) / len(dims), 2) if cnt > 0 else 0.0
+            else:
+                average_received = 0.0
+
             return {
-                'total_reviews': 0,
-                'average_given_rating': 0.0,
-                'average_received_rating': 0.0
+                'total_reviews': total_reviews,
+                'average_given_rating': average_given,
+                'average_received_rating': average_received
             }
         except Exception as e:
             logger.error(f"获取用户评价统计失败: user_id={user_id}, error={e}")

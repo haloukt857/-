@@ -837,7 +837,8 @@ class DatabaseInitializer:
             'user_profile_xp',
             'user_profile_points',
             'user_profile_orders',
-            'user_profile_badges'
+            'user_profile_badges',
+            'user_profile_card'
         ]
         
         missing_templates = []
@@ -900,7 +901,17 @@ class DatabaseInitializer:
                 'user_profile_xp': '经验值：{xp}',
                 'user_profile_points': '积分：{points}',
                 'user_profile_orders': '完成订单：{order_count}',
-                'user_profile_badges': '勋章：{badges_text}'
+                'user_profile_badges': '勋章：{badges_text}',
+                'user_profile_card': (
+                    '👤 我的资料\n'
+                    '- 用户名: {username}\n'
+                    '- 等级: {level_name}\n'
+                    '- 经验值: {xp}\n'
+                    '- 积分: {points}\n'
+                    '- 完成订单: {order_count} 次\n'
+                    '- 勋章: {badges_text}\n'
+                    '- 注册时间: {created_at}'
+                )
             }
             
             for template_key in missing_templates:

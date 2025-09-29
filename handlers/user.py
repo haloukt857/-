@@ -666,20 +666,46 @@ async def profile_command(message: Message, override_user=None):
     except (json.JSONDecodeError, TypeError):
         badges_text = await template_manager.get_template('data_invalid_format', '格式错误')
 
-    profile_title = await template_manager.get_template('user_profile_title')
-    level_text = await template_manager.get_template('user_profile_level')
-    xp_text = await template_manager.get_template('user_profile_xp')
-    points_text = await template_manager.get_template('user_profile_points')
-    orders_text = await template_manager.get_template('user_profile_orders')
-    badges_text_template = await template_manager.get_template('user_profile_badges')
+    # 优先使用单键模板（更易于配置）：user_profile_card
+    try:
+        if await template_manager.template_exists('user_profile_card'):
+            tpl = await template_manager.get_template('user_profile_card')
+            profile_card = tpl.format(
+                user_id=profile.get('user_id', ''),
+                username=profile.get('username', ''),
+                level_name=profile.get('level_name', '新手'),
+                xp=profile.get('xp', 0),
+                points=profile.get('points', 0),
+                order_count=profile.get('order_count', 0),
+                badges_text=badges_text,
+                created_at=profile.get('created_at', ''),
+            )
+        else:
+            # 兼容：按旧版多键拼装
+            profile_title = await template_manager.get_template('user_profile_title')
+            level_text = await template_manager.get_template('user_profile_level')
+            xp_text = await template_manager.get_template('user_profile_xp')
+            points_text = await template_manager.get_template('user_profile_points')
+            orders_text = await template_manager.get_template('user_profile_orders')
+            badges_text_template = await template_manager.get_template('user_profile_badges')
 
-    profile_card = f"""{profile_title}
+            profile_card = f"""{profile_title}
 
 {level_text.format(level_name=profile.get('level_name', '新手'))}
 {xp_text.format(xp=profile.get('xp', 0))}
 {points_text.format(points=profile.get('points', 0))}
 {orders_text.format(order_count=profile.get('order_count', 0))}
 {badges_text_template.format(badges_text=badges_text)}"""
+    except Exception:
+        # 回退到最简
+        profile_card = (
+            f"👤 我的资料\n"
+            f"- 等级: {profile.get('level_name','新手')}\n"
+            f"- 经验值: {profile.get('xp',0)}\n"
+            f"- 积分: {profile.get('points',0)}\n"
+            f"- 完成订单: {profile.get('order_count',0)}\n"
+            f"- 勋章: {badges_text}"
+        )
     # 用户资料 + 功能按钮（含“我的出击记录”）
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🗒️ 我的出击记录", callback_data="my_attack_records")],

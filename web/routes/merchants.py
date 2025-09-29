@@ -93,7 +93,7 @@ async def merchants_list(request: Request):
                     )
                 ),
                 
-                # 搜索筛选工具栏
+                # 搜索筛选工具栏（单行横向，紧凑控件，窄屏自动换行）
                 Div(
                     H3("搜索筛选", cls="text-xl font-semibold mb-4"),
                     Form(
@@ -111,7 +111,7 @@ async def merchants_list(request: Request):
                                     name="status",
                                     cls="select select-bordered w-full"
                                 ),
-                                cls="form-control min-w-[200px]"
+                                cls="form-control min-w-[140px]"
                             ),
                             # 商户搜索
                             Div(
@@ -122,7 +122,7 @@ async def merchants_list(request: Request):
                                     value=search_query,
                                     cls="input input-bordered w-full"
                                 ),
-                                cls="form-control flex-1"
+                                cls="form-control min-w-[220px] flex-1"
                             ),
                             # 每页显示
                             Div(
@@ -135,22 +135,22 @@ async def merchants_list(request: Request):
                                     name="per_page",
                                     cls="select select-bordered w-full"
                                 ),
-                                cls="form-control min-w-[160px]"
+                                cls="form-control min-w-[120px]"
                             ),
                             # 按钮区域
                             Div(
                                 Div(
-                                    Button("搜索筛选", type="submit", cls="btn btn-primary"),
-                                    Button("清除筛选", type="button", onclick="window.location.href='/merchants'", cls="btn btn-ghost ml-2"),
+                                    Button("搜索筛选", type="submit", cls="btn btn-primary btn-sm"),
+                                    A("重置", href="/merchants", cls="btn btn-outline btn-sm ml-2"),
                                     cls="flex gap-2"
                                 ),
-                                cls="form-control md:self-end"
+                                cls="form-control"
                             ),
-                            cls="flex flex-col md:flex-row md:items-end gap-4"
+                            cls="flex items-end gap-3 flex-wrap"
                         ),
                         method="GET",
                         action="/merchants",
-                        cls="card bg-base-100 shadow-xl p-6 mb-6"
+                        cls="card bg-base-100 shadow-xl p-4 mb-6"
                     )
                 ),
                 

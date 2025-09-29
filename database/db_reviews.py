@@ -58,7 +58,7 @@ class ReviewManager:
             INSERT INTO reviews (
                 order_id, merchant_id, customer_user_id, 
                 rating_appearance, rating_figure, rating_service, rating_attitude, rating_environment, 
-                text_review_by_user, status, is_confirmed_by_merchant
+                text_review_by_user, status, is_confirmed_by_admin
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
@@ -96,15 +96,15 @@ class ReviewManager:
                 logger.error(f"评价不存在: review_id={review_id}")
                 return False
             
-            if review_detail.get('is_confirmed_by_merchant'):
+            if review_detail.get('is_confirmed_by_admin'):
                 logger.warning(f"评价已被确认: review_id={review_id}")
                 return True  # 已确认的评价返回成功
             
             # 更新确认状态
             query = """
                 UPDATE reviews 
-                SET is_confirmed_by_merchant = TRUE, status = 'completed' 
-                WHERE id = ? AND is_confirmed_by_merchant = FALSE
+                SET is_confirmed_by_admin = TRUE, status = 'completed' 
+                WHERE id = ? AND is_confirmed_by_admin = FALSE
             """
             result = await db_manager.execute_query(query, (review_id,))
             
@@ -162,14 +162,14 @@ class ReviewManager:
         params = [merchant_id]
         
         if confirmed_only:
-            where_condition += " AND r.is_confirmed_by_merchant = TRUE"
+            where_condition += " AND r.is_confirmed_by_admin = 1"
         
         query = f"""
             SELECT 
                 r.id, r.order_id, r.merchant_id, r.customer_user_id,
                 r.rating_appearance, r.rating_figure, r.rating_service, 
                 r.rating_attitude, r.rating_environment,
-                r.text_review_by_user, r.is_confirmed_by_merchant, r.status,
+                r.text_review_by_user, r.is_confirmed_by_admin, r.status,
                 r.created_at,
                 u.username as customer_username
             FROM reviews r
@@ -366,7 +366,7 @@ class ReviewManager:
             FROM reviews r
             LEFT JOIN orders o ON r.order_id = o.id
             LEFT JOIN users u ON r.customer_user_id = u.user_id
-            WHERE r.merchant_id = ? AND r.is_confirmed_by_merchant = FALSE
+            WHERE r.merchant_id = ? AND r.is_confirmed_by_admin = 0
             ORDER BY r.created_at DESC
         """
         
@@ -398,7 +398,7 @@ class ReviewManager:
                 params.append(merchant_id)
             
             if is_confirmed is not None:
-                where_conditions.append("r.is_confirmed_by_merchant = ?")
+                where_conditions.append("r.is_confirmed_by_admin = ?")
                 params.append(is_confirmed)
             
             if date_from:
@@ -453,7 +453,7 @@ class ReviewManager:
                 params.append(merchant_id)
             
             if is_confirmed is not None:
-                where_conditions.append("is_confirmed_by_merchant = ?")
+                where_conditions.append("is_confirmed_by_admin = ?")
                 params.append(is_confirmed)
             
             if date_from:
@@ -578,7 +578,7 @@ class ReviewManager:
             query = """
                 SELECT DATE(created_at) as day, COUNT(*) as count
                 FROM reviews
-                WHERE created_at >= ? AND is_confirmed_by_merchant = TRUE
+                WHERE created_at >= ? AND is_confirmed_by_admin = TRUE
                 GROUP BY DATE(created_at)
                 ORDER BY day ASC
             """

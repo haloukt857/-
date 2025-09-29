@@ -74,27 +74,22 @@ async def users_dashboard(request: Request):
         cls="stats shadow mb-6"
     )
     
-    # 搜索和筛选表单（对齐旧版布局）
+    # 搜索和筛选表单（单行横向，紧凑控件，窄屏自动换行）
     filter_form = Form(
         Div(
             Div(
                 Label("等级筛选", cls="label"),
                 Select(
                     Option("所有等级", value="", selected=(not level_filter)),
-                    *[Option(level['level_name'], value=level['level_name'], 
-                            selected=(level_filter == level['level_name'])) 
-                      for level in levels],
+                    *[Option(level['level_name'], value=level['level_name'], selected=(level_filter == level['level_name'])) for level in levels],
                     name="level", cls="select select-bordered w-full"
                 ),
-                cls="form-control"
+                cls="form-control min-w-[140px]"
             ),
             Div(
                 Label("用户搜索", cls="label"),
-                Input(
-                    name="search", placeholder="用户名或用户ID", value=search_query,
-                    cls="input input-bordered w-full"
-                ),
-                cls="form-control"
+                Input(name="search", placeholder="用户名或用户ID", value=search_query, cls="input input-bordered w-full"),
+                cls="form-control min-w-[220px] flex-1"
             ),
             Div(
                 Label("每页显示", cls="label"),
@@ -105,18 +100,22 @@ async def users_dashboard(request: Request):
                     Option("100条", value="100", selected=(per_page == 100)),
                     name="per_page", cls="select select-bordered w-full"
                 ),
-                cls="form-control"
+                cls="form-control min-w-[120px]"
             ),
             Div(
-                Button("搜索", type="submit", cls="btn btn-primary"),
-                A("重置", href="/users", cls="btn btn-ghost ml-2"),
-                cls="form-control mt-6"
+                Label("操作", cls="label opacity-0"),
+                Div(
+                    Button("搜索", type="submit", cls="btn btn-primary btn-sm"),
+                    A("重置", href="/users", cls="btn btn-outline btn-sm ml-2"),
+                    cls="flex gap-2"
+                ),
+                cls="form-control"
             ),
-            cls="grid grid-cols-1 md:grid-cols-4 gap-4"
+            cls="flex items-end gap-3 flex-wrap"
         ),
         method="GET",
         action="/users",
-        cls="card bg-base-100 shadow-xl p-6 mb-6"
+        cls="card bg-base-100 shadow-xl p-4 mb-6"
     )
     
     # 工具栏按钮（对齐旧版功能）
@@ -175,10 +174,8 @@ async def users_dashboard(request: Request):
                         # 操作列
                         Td(
                             Div(
-                                A("查看详情", href=f"/users/{user.get('user_id')}/detail", 
-                                  cls="btn btn-sm btn-primary mr-1"),
-                                A("编辑", href=f"/users/{user.get('user_id')}/edit", 
-                                  cls="btn btn-sm btn-secondary"),
+                                A("详情", href=f"/users/{user.get('user_id')}/detail", cls="btn btn-sm btn-info mr-1"),
+                                A("激励", href=f"/incentives/users/{user.get('user_id')}/detail", cls="btn btn-sm btn-secondary"),
                                 cls="flex gap-1"
                             )
                         )
