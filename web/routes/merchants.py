@@ -98,6 +98,7 @@ async def merchants_list(request: Request):
                     H3("搜索筛选", cls="text-xl font-semibold mb-4"),
                     Form(
                         Div(
+                            # 状态筛选
                             Div(
                                 Label("状态筛选", cls="label"),
                                 Select(
@@ -110,8 +111,9 @@ async def merchants_list(request: Request):
                                     name="status",
                                     cls="select select-bordered w-full"
                                 ),
-                                cls="form-control"
+                                cls="form-control min-w-[200px]"
                             ),
+                            # 商户搜索
                             Div(
                                 Label("商户搜索", cls="label"),
                                 Input(
@@ -120,8 +122,9 @@ async def merchants_list(request: Request):
                                     value=search_query,
                                     cls="input input-bordered w-full"
                                 ),
-                                cls="form-control"
+                                cls="form-control flex-1"
                             ),
+                            # 每页显示
                             Div(
                                 Label("每页显示", cls="label"),
                                 Select(
@@ -132,14 +135,18 @@ async def merchants_list(request: Request):
                                     name="per_page",
                                     cls="select select-bordered w-full"
                                 ),
-                                cls="form-control"
+                                cls="form-control min-w-[160px]"
                             ),
+                            # 按钮区域
                             Div(
-                                Button("搜索筛选", type="submit", cls="btn btn-primary"),
-                                Button("清除筛选", type="button", onclick="window.location.href='/merchants'", cls="btn btn-ghost ml-2"),
-                                cls="form-control mt-4"
+                                Div(
+                                    Button("搜索筛选", type="submit", cls="btn btn-primary"),
+                                    Button("清除筛选", type="button", onclick="window.location.href='/merchants'", cls="btn btn-ghost ml-2"),
+                                    cls="flex gap-2"
+                                ),
+                                cls="form-control md:self-end"
                             ),
-                            cls="grid grid-cols-1 md:grid-cols-4 gap-4"
+                            cls="flex flex-col md:flex-row md:items-end gap-4"
                         ),
                         method="GET",
                         action="/merchants",
