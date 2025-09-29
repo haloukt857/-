@@ -93,7 +93,8 @@ class PostMgmtService:
         per_page: int = 20,
         kw_id: Optional[int] = None,
         price_p: Optional[int] = None,
-        price_pp: Optional[int] = None
+        price_pp: Optional[int] = None,
+        sort_by: str = 'publish_time'
     ) -> Dict[str, Any]:
         """
         获取帖子列表
@@ -133,7 +134,8 @@ class PostMgmtService:
                     per_page=per_page,
                     status=status_filter,
                     district_id=int(region_filter) if region_filter else None,
-                    search=search_query
+                    search=search_query,
+                    sort_by=sort_by
                 )
                 merchants = merchants_data.get('posts', [])
                 total_posts = merchants_data.get('total', 0)

@@ -194,7 +194,8 @@ async def posts_list(request: Request):
             per_page=per_page,
             kw_id=kw_id,
             price_p=price_p,
-            price_pp=price_pp
+            price_pp=price_pp,
+            sort_by=sort_by
         )
         
         posts = posts_data["posts"]
@@ -205,14 +206,12 @@ async def posts_list(request: Request):
         # 构建筛选表单（与商户管理风格一致：一行四项+按钮对齐）
         filter_form = Form(
             Div(
-                # 状态筛选
+                # 状态筛选（使用服务层提供的映射，避免前后端不一致）
                 Div(
                     Label("状态筛选:", cls="label"),
                     Select(
                         Option("全部状态", value="", selected=not status_filter),
-                        *[Option(POST_STATUS_DISPLAY_MAP[status], value=status, 
-                               selected=status_filter==status) 
-                          for status in POST_STATUS_DISPLAY_MAP.keys()],
+                        *[Option(posts_data.get('status_options', {}).get(k, k), value=k, selected=(status_filter==k)) for k in posts_data.get('status_options', {}).keys()],
                         name="status", cls="select select-bordered w-full"
                     ),
                     cls="form-control min-w-[200px]"
