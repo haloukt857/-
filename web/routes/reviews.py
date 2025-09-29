@@ -150,82 +150,79 @@ async def reviews_list(request: Request):
                 cls="stats-container"
             ),
             
-            # 筛选表单（统一风格：一行多项 + 按钮对齐）
+            # 筛选表单（单行横向，紧凑控件）
             Form(
                 Div(
-                    # 第一行筛选器
                     Div(
-                        Div(
-                            Label("状态筛选", cls="label"),
-                            okx_select("status", ([("", "全部状态")] + [(k, v) for k, v in (status_options or {}).items()]) if status_options else [("", "全部状态"), ("pending_user_review", "待用户评价"), ("pending_merchant_review", "待商户确认"), ("completed", "已完成")], selected=request.query_params.get('status', ''), cls="select select-bordered w-full"),
-                            cls="form-control"
+                        Label("状态筛选", cls="label"),
+                        okx_select(
+                            "status",
+                            [("", "全部状态")] + [(k, v) for k, v in (status_options or {}).items()] if status_options else [("", "全部状态"), ("pending_user_review", "待用户评价"), ("pending_merchant_review", "待商户确认"), ("completed", "已完成")],
+                            selected=request.query_params.get('status', ''),
+                            cls="select select-bordered w-full"
                         ),
-                        Div(
-                            Label("商户筛选", cls="label"),
-                            okx_select("merchant", [('', '全部商户')] + 
-                                      [(str(m.get('id', '')), f"#{m.get('id', '')} - {m.get('name', '')[:20]}") for m in merchants], 
-                                      selected=request.query_params.get('merchant', ''), cls="select select-bordered w-full"),
-                            cls="form-control"
-                        ),
-                        Div(
-                            Label("确认状态", cls="label"),
-                            okx_select("confirmed", [
-                                ('', '全部'),
-                                ('true', '已确认'),
-                                ('false', '未确认')
-                            ], selected=request.query_params.get('confirmed', ''), cls="select select-bordered w-full"),
-                            cls="form-control"
-                        ),
-                        Div(
-                            Label("每页显示", cls="label"),
-                            okx_select("per_page", [
-                                ('10', '10条'),
-                                ('20', '20条'),
-                                ('50', '50条'),
-                                ('100', '100条')
-                            ], selected=str(per_page), cls="select select-bordered w-full"),
-                            cls="form-control"
-                        ),
-                        cls="flex flex-col md:flex-row md:items-end gap-4 flex-wrap"
+                        cls="form-control min-w-[140px]"
                     ),
-                    
-                    # 第二行：日期范围和搜索
                     Div(
-                        Div(
-                            Label("开始日期", cls="label"),
-                            okx_input("date_from", type="date", value=request.query_params.get('date_from', ''),
-                                     cls="input input-bordered w-full"),
-                            cls="form-control"
+                        Label("商户筛选", cls="label"),
+                        okx_select(
+                            "merchant",
+                            [('', '全部商户')] + ([(str(m.get('id','')), f"#{m.get('id','')} - {m.get('name','')[:18]}") for m in merchants] if merchants else []),
+                            selected=request.query_params.get('merchant', ''),
+                            cls="select select-bordered w-full"
                         ),
-                        Div(
-                            Label("结束日期", cls="label"),
-                            okx_input("date_to", type="date", value=request.query_params.get('date_to', ''),
-                                     cls="input input-bordered w-full"),
-                            cls="form-control"
-                        ),
-                        Div(
-                            Label("评价搜索", cls="label"),
-                            okx_input("search", placeholder="用户名或商户名", value=search_query or '',
-                                     cls="input input-bordered w-full"),
-                            cls="form-control"
-                        ),
-                        # 操作按钮
-                        Div(
-                            Label("操作", cls="label opacity-0"),
-                            Div(
-                                okx_button("🔍 筛选", type="submit", cls="btn btn-primary"),
-                                A("🔄 重置", href="/reviews", cls="btn btn-outline ml-2"),
-                                cls="flex gap-2"
-                            ),
-                            cls="form-control"
-                        ),
-                        cls="flex flex-col md:flex-row md:items-end gap-4 flex-wrap"
+                        cls="form-control min-w-[180px]"
                     ),
-                    cls="space-y-4"
+                    Div(
+                        Label("确认状态", cls="label"),
+                        okx_select(
+                            "confirmed",
+                            [("", "全部"), ("true", "已确认"), ("false", "未确认")],
+                            selected=request.query_params.get('confirmed', ''),
+                            cls="select select-bordered w-full"
+                        ),
+                        cls="form-control min-w-[120px]"
+                    ),
+                    Div(
+                        Label("每页显示", cls="label"),
+                        okx_select(
+                            "per_page",
+                            [("10", "10条"), ("20", "20条"), ("50", "50条"), ("100", "100条")],
+                            selected=str(per_page),
+                            cls="select select-bordered w-full"
+                        ),
+                        cls="form-control min-w-[120px]"
+                    ),
+                    Div(
+                        Label("开始日期", cls="label"),
+                        okx_input("date_from", type="date", value=request.query_params.get('date_from', ''), cls="input input-bordered w-full"),
+                        cls="form-control min-w-[150px]"
+                    ),
+                    Div(
+                        Label("结束日期", cls="label"),
+                        okx_input("date_to", type="date", value=request.query_params.get('date_to', ''), cls="input input-bordered w-full"),
+                        cls="form-control min-w-[150px]"
+                    ),
+                    Div(
+                        Label("评价搜索", cls="label"),
+                        okx_input("search", placeholder="用户名或商户名", value=search_query or '', cls="input input-bordered w-full"),
+                        cls="form-control min-w-[220px] flex-1"
+                    ),
+                    Div(
+                        Label("操作", cls="label opacity-0"),
+                        Div(
+                            okx_button("🔍 筛选", type="submit", cls="btn btn-primary btn-sm"),
+                            A("🔄 重置", href="/reviews", cls="btn btn-outline btn-sm ml-2"),
+                            cls="flex gap-2"
+                        ),
+                        cls="form-control"
+                    ),
+                    cls="flex items-end gap-3 flex-wrap"
                 ),
                 method="GET",
                 action="/reviews",
-                cls="card bg-base-100 shadow-xl p-6 mb-6"
+                cls="card bg-base-100 shadow-xl p-4 mb-6"
+            ),
             ),
             
             # 工具栏（统一为OKX深色主题的中性工具栏样式）
