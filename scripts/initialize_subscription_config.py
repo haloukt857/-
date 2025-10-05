@@ -46,7 +46,18 @@ async def initialize_subscription_config():
         )
         
         if existing_config is not None:
-            logger.info("频道订阅验证配置已存在，跳过初始化")
+            # 若已存在，则进行一次标准化写回，避免遗留旧键名
+            try:
+                norm = _normalize_required_list(existing_config.get('required_subscriptions', []))
+                existing_config['required_subscriptions'] = norm
+                await system_config_manager.set_config(
+                    'subscription_verification_config',
+                    existing_config,
+                    '频道订阅验证配置 - 标准化写回'
+                )
+                logger.info("已对既有订阅配置做键名标准化")
+            except Exception:
+                logger.warning("既有订阅配置标准化失败（忽略，不影响初始化）")
             print("✅ 频道订阅验证配置已存在")
             return
         
@@ -70,6 +81,21 @@ async def initialize_subscription_config():
         print(f"❌ 配置初始化失败: {e}")
         return False
 
+def _normalize_subscription_item(item: dict) -> dict:
+    return {
+        'chat_id': item.get('chat_id') or item.get('channel_id') or item.get('id') or '',
+        'display_name': item.get('display_name') or item.get('channel_name') or item.get('name') or '',
+        'join_link': item.get('join_link') or item.get('channel_url') or item.get('url') or '',
+    }
+
+def _normalize_required_list(items: list) -> list:
+    out = []
+    for it in items or []:
+        n = _normalize_subscription_item(it)
+        if n.get('chat_id'):
+            out.append(n)
+    return out
+
 async def update_subscription_config(enabled: bool = None, channels: list = None):
     """更新频道订阅验证配置"""
     try:
@@ -86,7 +112,7 @@ async def update_subscription_config(enabled: bool = None, channels: list = None
             config['enabled'] = enabled
             
         if channels is not None:
-            config['required_subscriptions'] = channels
+            config['required_subscriptions'] = _normalize_required_list(channels)
         
         # 保存配置
         await system_config_manager.set_config(
@@ -136,6 +162,21 @@ async def show_current_config():
         logger.error(f"获取配置失败: {e}")
         print(f"❌ 获取配置失败: {e}")
 
+async def normalize_subscription_config():
+    """标准化现有订阅配置键名（channel_* -> chat_id/display_name/join_link）"""
+    try:
+        cfg = await system_config_manager.get_config('subscription_verification_config', None)
+        if not isinstance(cfg, dict):
+            print('❌ 配置不存在')
+            return False
+        cfg['required_subscriptions'] = _normalize_required_list(cfg.get('required_subscriptions', []))
+        await system_config_manager.set_config('subscription_verification_config', cfg, '频道订阅验证配置 - 标准化写回')
+        print('✅ 已标准化订阅配置')
+        return True
+    except Exception as e:
+        print(f'❌ 标准化失败: {e}')
+        return False
+
 async def main():
     """主函数"""
     if len(sys.argv) < 2:
@@ -144,6 +185,7 @@ async def main():
         print("  python initialize_subscription_config.py show          - 显示当前配置")
         print("  python initialize_subscription_config.py enable        - 启用验证")
         print("  python initialize_subscription_config.py disable       - 禁用验证")
+        print("  python initialize_subscription_config.py normalize     - 标准化既有配置键名")
         return
     
     command = sys.argv[1].lower()
@@ -156,6 +198,8 @@ async def main():
         await update_subscription_config(enabled=True)
     elif command == "disable":
         await update_subscription_config(enabled=False)
+    elif command == "normalize":
+        await normalize_subscription_config()
     else:
         print(f"❌ 未知命令: {command}")
 

@@ -171,6 +171,9 @@ app.get("/incentives/analytics")(incentives.incentives_analytics)
 
 # 订阅管理路由
 app.get("/subscription")(subscription.subscription_dashboard)
+app.post("/subscription/toggle")(subscription.subscription_toggle_post)
+app.post("/subscription/channels/add")(subscription.subscription_add_channel_post)
+app.post("/subscription/channels/remove")(subscription.subscription_remove_channel_post)
 
 # 绑定码管理路由
 app.get("/binding-codes")(binding_codes.binding_codes_list)

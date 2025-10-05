@@ -23,6 +23,35 @@ class SubscriptionMgmtService:
     
     CACHE_NAMESPACE = "subscription_mgmt"
     DEFAULT_CONFIG = {"enabled": False, "required_subscriptions": []}
+
+    # --- 统一字段约定 ---
+    # 为避免“新旧字段并存”导致的运行时不一致，服务层统一使用并写入如下结构：
+    #   required_subscriptions: [
+    #       {"chat_id": str, "display_name": str, "join_link": str}
+    #   ]
+    # 历史可能存在的字段（channel_id/channel_name/channel_url）在入库前一律转换为上述标准键。
+
+    @staticmethod
+    def _normalize_subscription_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        """将单个频道配置规范化为统一键名结构。
+
+        返回的字典固定包含：chat_id, display_name, join_link。
+        """
+        return {
+            'chat_id': item.get('chat_id') or item.get('channel_id') or item.get('id') or '',
+            'display_name': item.get('display_name') or item.get('channel_name') or item.get('name') or '',
+            'join_link': item.get('join_link') or item.get('channel_url') or item.get('url') or '',
+        }
+
+    @staticmethod
+    def _normalize_required_list(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """批量规范化并去除明显空项。"""
+        normalized = []
+        for it in items or []:
+            n = SubscriptionMgmtService._normalize_subscription_item(it)
+            if n.get('chat_id'):
+                normalized.append(n)
+        return normalized
     
     @staticmethod
     async def get_subscription_dashboard() -> Dict[str, Any]:
@@ -38,6 +67,11 @@ class SubscriptionMgmtService:
                 'subscription_verification_config',
                 SubscriptionMgmtService.DEFAULT_CONFIG
             )
+            # 规范化 required_subscriptions（避免历史数据中的旧字段影响展示层）
+            if isinstance(config, dict):
+                config['required_subscriptions'] = SubscriptionMgmtService._normalize_required_list(
+                    config.get('required_subscriptions', [])
+                )
             
             # 获取统计数据
             stats = await SubscriptionMgmtService._get_subscription_statistics()
@@ -81,6 +115,10 @@ class SubscriptionMgmtService:
                 'subscription_verification_config',
                 SubscriptionMgmtService.DEFAULT_CONFIG
             )
+            if isinstance(config, dict):
+                config['required_subscriptions'] = SubscriptionMgmtService._normalize_required_list(
+                    config.get('required_subscriptions', [])
+                )
             
             return {
                 'config': config,
@@ -117,7 +155,8 @@ class SubscriptionMgmtService:
         try:
             new_config = {
                 'enabled': enabled,
-                'required_subscriptions': required_subscriptions,
+                # 入库前统一规范化字段，确保中间件直接可用
+                'required_subscriptions': SubscriptionMgmtService._normalize_required_list(required_subscriptions),
                 'verification_message': verification_message or '请先订阅必需的频道',
                 'bypass_for_premium': bypass_for_premium,
                 'updated_at': datetime.now().isoformat()
@@ -161,23 +200,29 @@ class SubscriptionMgmtService:
                 SubscriptionMgmtService.DEFAULT_CONFIG
             )
             
-            required_subscriptions = config.get('required_subscriptions', [])
+            # 统一字段（兼容旧参数名，但入库一律使用标准字段）
+            required_subscriptions = SubscriptionMgmtService._normalize_required_list(
+                config.get('required_subscriptions', [])
+            )
             
             # 检查频道是否已存在
-            if any(sub['channel_id'] == channel_id for sub in required_subscriptions):
+            # 以 chat_id 为唯一键进行去重
+            if any(str(sub.get('chat_id')) == str(channel_id) for sub in required_subscriptions):
                 return {'success': False, 'error': '该频道已在必需订阅列表中'}
             
             # 添加新频道
             required_subscriptions.append({
-                'channel_id': channel_id,
-                'channel_name': channel_name,
-                'channel_url': channel_url,
+                'chat_id': channel_id,
+                'display_name': channel_name,
+                'join_link': channel_url,
                 'added_at': datetime.now().isoformat()
             })
             
             config['required_subscriptions'] = required_subscriptions
             config['updated_at'] = datetime.now().isoformat()
             
+            # 回写前保持整体结构规范
+            config['required_subscriptions'] = SubscriptionMgmtService._normalize_required_list(required_subscriptions)
             result = await system_config_manager.set_config(
                 'subscription_verification_config',
                 config
@@ -187,7 +232,7 @@ class SubscriptionMgmtService:
                 # 清除相关缓存
                 CacheService.clear_namespace(SubscriptionMgmtService.CACHE_NAMESPACE)
                 
-                logger.info(f"添加必需订阅频道成功: channel_id={channel_id}, name={channel_name}")
+                logger.info(f"添加必需订阅频道成功: chat_id={channel_id}, name={channel_name}")
                 return {'success': True, 'message': '必需订阅频道添加成功'}
             else:
                 return {'success': False, 'error': '添加失败'}
@@ -214,15 +259,18 @@ class SubscriptionMgmtService:
                 SubscriptionMgmtService.DEFAULT_CONFIG
             )
             
-            required_subscriptions = config.get('required_subscriptions', [])
+            required_subscriptions = SubscriptionMgmtService._normalize_required_list(
+                config.get('required_subscriptions', [])
+            )
             
             # 查找并移除频道
-            updated_subscriptions = [sub for sub in required_subscriptions if sub['channel_id'] != channel_id]
+            # 以 chat_id 匹配删除（兼容历史入库差异）
+            updated_subscriptions = [sub for sub in required_subscriptions if str(sub.get('chat_id')) != str(channel_id)]
             
             if len(updated_subscriptions) == len(required_subscriptions):
                 return {'success': False, 'error': '未找到指定的频道'}
             
-            config['required_subscriptions'] = updated_subscriptions
+            config['required_subscriptions'] = SubscriptionMgmtService._normalize_required_list(updated_subscriptions)
             config['updated_at'] = datetime.now().isoformat()
             
             result = await system_config_manager.set_config(
@@ -234,7 +282,7 @@ class SubscriptionMgmtService:
                 # 清除相关缓存
                 CacheService.clear_namespace(SubscriptionMgmtService.CACHE_NAMESPACE)
                 
-                logger.info(f"移除必需订阅频道成功: channel_id={channel_id}")
+                logger.info(f"移除必需订阅频道成功: chat_id={channel_id}")
                 return {'success': True, 'message': '必需订阅频道移除成功'}
             else:
                 return {'success': False, 'error': '移除失败'}
@@ -289,7 +337,9 @@ class SubscriptionMgmtService:
                 }
             
             # 获取必需的订阅
-            required_subscriptions = config.get('required_subscriptions', [])
+            required_subscriptions = SubscriptionMgmtService._normalize_required_list(
+                config.get('required_subscriptions', [])
+            )
             if not required_subscriptions:
                 return {
                     'verified': True,
@@ -309,9 +359,8 @@ class SubscriptionMgmtService:
             
             is_verified = len(missing_subscriptions) == 0
             
-            # 更新用户订阅状态
-            if is_verified and not user.get('subscription_verified_time'):
-                await user_manager.update_user_subscription_status(user_id, True, datetime.now())
+            # 最小化修改：不落库用户订阅状态（数据库与方法未定义）。
+            # 若后续需要持久化，请在 db_users.py 实现相应字段与方法后再恢复写入。
             
             return {
                 'verified': is_verified,
@@ -437,14 +486,16 @@ class SubscriptionMgmtService:
                 SubscriptionMgmtService.DEFAULT_CONFIG
             )
             
-            channels = config.get('required_subscriptions', [])
+            channels = SubscriptionMgmtService._normalize_required_list(
+                config.get('required_subscriptions', [])
+            )
             performance = []
             
             for channel in channels:
                 # TODO: 实现频道订阅数统计逻辑
                 performance.append({
-                    'channel_id': channel['channel_id'],
-                    'channel_name': channel['channel_name'],
+                    'channel_id': channel.get('chat_id'),
+                    'channel_name': channel.get('display_name'),
                     'subscriber_count': 0,  # 需要实际实现
                     'growth_rate': 0.0,  # 需要实际实现
                     'added_at': channel.get('added_at', '')
