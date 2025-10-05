@@ -28,6 +28,35 @@ from ..services.subscription_mgmt_service import SubscriptionMgmtService
 
 logger = logging.getLogger(__name__)
 
+def _parse_channel_input(text: str) -> tuple[str, str]:
+    """从管理员输入解析 chat_id 与 join_link。
+    支持：@username、-100 开头的数值ID、https://t.me/username。
+    返回：(chat_id, join_link)。若无法解析 chat_id，抛出 ValueError。
+    """
+    import re
+    t = (text or '').strip()
+    if not t:
+        raise ValueError('empty')
+    # 1) 纯 @username
+    if t.startswith('@') and len(t) > 1:
+        username = t[1:]
+        return f'@{username}', f'https://t.me/{username}'
+    # 2) -100 开头的数值 chat_id
+    if re.fullmatch(r'-100\d+', t):
+        return t, ''
+    # 3) t.me 链接
+    m = re.match(r'^https?://t\.me/([A-Za-z0-9_]{5,})', t)
+    if m:
+        username = m.group(1)
+        return f'@{username}', f'https://t.me/{username}'
+    # 4) 简写 t.me/username
+    m = re.match(r'^t\.me/([A-Za-z0-9_]{5,})', t)
+    if m:
+        username = m.group(1)
+        return f'@{username}', f'https://t.me/{username}'
+    # 5) 其它邀请链接（如 t.me/+xxxx）无法反解出 chat_id，提示失败
+    raise ValueError('无法从输入中解析 chat_id 或 @用户名')
+
 
 @require_auth
 async def subscription_dashboard(request: Request):
@@ -90,36 +119,20 @@ async def subscription_dashboard(request: Request):
             cls="stats-container mb-6"
         )
 
-        # 开关表单（POST + CSRF）
+        # 开关表单（POST + CSRF）- 保留单层外框
         toggle_form = Form(
             Input(type="hidden", name="csrf_token", value=csrf),
             okx_form_group(
                 "启用订阅验证",
-                okx_select("enabled", [("1", "启用"), ("0", "禁用")], selected=("1" if status.get('enabled') else "0")),
-                help_text="开启后，非管理员用户与机器人交互前需关注配置的频道"
+                okx_select("enabled", [("1", "启用"), ("0", "禁用")], selected=("1" if status.get('enabled') else "0"))
             ),
             okx_button("保存开关", type="submit", cls="btn btn-primary btn-sm"),
             method="post",
             action="/subscription/toggle",
-            cls="bg-base-200 p-4 rounded-lg"
+            cls="space-y-3"
         )
 
-        # 添加频道表单（POST + CSRF）
-        add_form = Details(
-            Summary("➕ 添加必需频道", cls="btn btn-primary btn-sm mb-2"),
-            Form(
-                Input(type="hidden", name="csrf_token", value=csrf),
-                okx_form_group("展示名称", okx_input("display_name", placeholder="例如：官方频道", required=False)),
-                okx_form_group("频道标识 chat_id", okx_input("chat_id", placeholder="@your_channel 或 -100xxxx", required=True),
-                                help_text="用于机器人API校验订阅状态"),
-                okx_form_group("加入链接 join_link", okx_input("join_link", placeholder="https://t.me/your_channel", required=False)),
-                okx_button("添加", type="submit", cls="btn btn-success btn-sm"),
-                method="post",
-                action="/subscription/channels/add",
-                cls="bg-base-200 p-4 rounded-lg"
-            ),
-            cls="mb-4"
-        )
+        # 添加频道表单在下方 add_card 中直接渲染
 
         # 频道表格
         table_rows = []
@@ -153,29 +166,56 @@ async def subscription_dashboard(request: Request):
             )
 
         channels_table = Div(
-            H3("必需订阅频道", cls="text-lg font-semibold mb-2"),
             Table(
                 Thead(Tr(Th("#"), Th("名称"), Th("chat_id"), Th("加入链接"), Th("操作"))),
                 Tbody(*table_rows if table_rows else [Tr(Td(Span("暂无配置", cls="text-gray-500"), colspan="5"))])
             ),
-            cls="mb-6"
+            cls="mb-2"
+        )
+
+        # 更整洁的分区：开关、添加、列表采用卡片布局
+        toggle_card = Div(
+            H3("功能开关", cls="text-lg font-semibold mb-3"),
+            toggle_form,
+            cls="card bg-base-100 shadow p-6 mb-6"
+        )
+
+        add_card = Div(
+            H3("添加必需频道", cls="text-lg font-semibold mb-3"),
+            Form(
+                Input(type="hidden", name="csrf_token", value=csrf),
+                okx_form_group("名称", okx_input("display_name", placeholder="例如：官方频道")),
+                okx_form_group(
+                    "频道/链接",
+                    okx_input(
+                        "channel_input",
+                        placeholder="支持 @username / -100 开头ID / https://t.me/username",
+                        required=True
+                    ),
+                    help_text="粘贴频道用户名、数值 chat_id 或公开频道链接"
+                ),
+                okx_button("添加", type="submit", cls="btn btn-success btn-sm"),
+                method="post",
+                action="/subscription/channels/add",
+                cls="space-y-3"
+            ),
+            cls="card bg-base-100 shadow p-6 mb-6"
+        )
+
+        list_card = Div(
+            H3("必需订阅频道", cls="text-lg font-semibold mb-3"),
+            channels_table,
+            cls="card bg-base-100 shadow p-6"
         )
 
         content = Div(
             H1("订阅验证管理", cls="page-title"),
-            P("配置并管理机器人强制订阅（频道关注）功能", cls="page-subtitle"),
+            P("配置强制订阅（频道关注）", cls="page-subtitle"),
             alert or "",
             stats,
-            Div(
-                H3("功能开关", cls="text-lg font-semibold mb-2"),
-                toggle_form,
-                cls="mb-6"
-            ),
-            add_form,
-            channels_table,
-            Div(
-                P("提示：本页已与机器人校验逻辑对齐，字段统一为 chat_id/display_name/join_link。", cls="text-sm text-gray-500")
-            )
+            toggle_card,
+            add_card,
+            list_card
         )
 
         return create_layout("订阅验证管理", content)
@@ -230,10 +270,11 @@ async def subscription_add_channel_post(request: Request):
             return RedirectResponse(url="/subscription?error=csrf", status_code=302)
 
         display_name = (form.get('display_name') or '').strip()
-        chat_id = (form.get('chat_id') or '').strip()
-        join_link = (form.get('join_link') or '').strip()
-        if not chat_id:
-            return RedirectResponse(url="/subscription?error=chat_id_required", status_code=302)
+        channel_input = (form.get('channel_input') or '').strip()
+        try:
+            chat_id, join_link = _parse_channel_input(channel_input)
+        except Exception:
+            return RedirectResponse(url="/subscription?error=invalid_channel_input", status_code=302)
 
         result = await SubscriptionMgmtService.add_required_subscription(
             channel_id=chat_id, channel_name=display_name or chat_id, channel_url=join_link

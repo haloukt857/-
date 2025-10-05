@@ -14,6 +14,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 # 导入
 from database.db_system_config import system_config_manager
 from config import ADMIN_IDS
+from utils.template_utils import get_template_async
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +62,8 @@ class SubscriptionVerificationMiddleware(BaseMiddleware):
         if not user:
             return await handler(event, data)
             
-        # 对系统基础命令放行（如 /start），避免因配置问题阻塞基本交互
-        if isinstance(event, Message) and event.text:
-            text = (event.text or "").strip().lower()
-            if text.startswith('/start') or text.startswith('/help'):
-                return await handler(event, data)
+        # 取消 /start 和 /help 放行：首次 /start 也执行订阅校验
+        # 如果需要放行，可在此处基于配置开关或白名单恢复
 
         # 检查是否需要验证
         if not await self.should_verify(user.id):
@@ -81,13 +79,33 @@ class SubscriptionVerificationMiddleware(BaseMiddleware):
         
         if not is_verified:
             # 验证失败，发送提醒并中断处理
+            # 对回调查询的特殊处理：若是“我已加入/重新检测”，给出针对性提示
+            if isinstance(event, CallbackQuery):
+                data_str = (event.data or '') if hasattr(event, 'data') else ''
+                if data_str == 'subscription_check':
+                    await event.answer("❌ 仍未检测到加入，请稍后再试", show_alert=True)
+                    return None
+                else:
+                    await event.answer("❌ 请先关注必需频道后再试", show_alert=True)
+                    return None
+
+            # 普通消息：发送模板化的验证提示
             if isinstance(event, Message):
                 await self._send_verification_failure_message(event)
-            elif isinstance(event, CallbackQuery):
-                await event.answer("❌ 请先关注必需频道后再试", show_alert=True)
-            return None
+                return None
             
-        # 验证通过，继续处理
+        # 验证通过
+        # 对“我已加入”检测按钮，直接给出成功提示并结束回调
+        if isinstance(event, CallbackQuery):
+            data_str = (event.data or '') if hasattr(event, 'data') else ''
+            if data_str == 'subscription_check':
+                try:
+                    await event.answer("✅ 已检测到订阅，感谢加入！", show_alert=True)
+                except Exception:
+                    pass
+                return None
+
+        # 继续处理
         return await handler(event, data)
     
     async def _get_config(self) -> Dict[str, Any]:
@@ -216,33 +234,42 @@ class SubscriptionVerificationMiddleware(BaseMiddleware):
         try:
             config = await self._get_config()
             subscriptions = config.get("required_subscriptions", [])
-            
-            # 构建消息文本
-            message_lines = ["❌ 您需要先关注以下频道才能使用机器人功能：\n"]
-            keyboard_buttons = []
-            
+
+            # 渲染模板文本（从 templates 表获取，可在 Web -> 模板管理编辑）
+            # 模板键：subscription_verification_prompt
+            # 可用变量：channels_text（如：1. 名称\n2. 名称...）
+            channels_lines = []
+            for i, sub in enumerate(subscriptions, 1):
+                display_name = sub.get("display_name", f"频道{i}")
+                channels_lines.append(f"{i}. {display_name}")
+            channels_text = "\n".join(channels_lines) if channels_lines else "（未配置频道）"
+
+            try:
+                message_text = await get_template_async(
+                    "subscription_verification_prompt",
+                    channels_text=channels_text
+                )
+            except Exception:
+                # 若模板缺失，退回到简易提示（避免打断流程）
+                message_text = f"❌ 您需要先关注以下频道才能使用机器人功能：\n\n{channels_text}\n\n关注完成后点击下方“✅ 我已加入”检测。"
+
+            # 构建键盘：每个频道一个“加入”按钮 + 一个“✅ 我已加入”
+            keyboard_rows = []
             for i, subscription in enumerate(subscriptions, 1):
                 display_name = subscription.get("display_name", f"频道{i}")
-                message_lines.append(f"{i}. {display_name}")
-                
-                # 添加加入按钮
                 join_link = subscription.get("join_link")
                 if join_link:
-                    keyboard_buttons.append([
-                        InlineKeyboardButton(
-                            text=f"加入 {display_name}",
-                            url=join_link
-                        )
+                    keyboard_rows.append([
+                        InlineKeyboardButton(text=f"加入 {display_name}", url=join_link)
                     ])
-            
-            message_lines.append("\n关注完成后请重新发送命令")
-            message_text = "\n".join(message_lines)
-            
-            # 创建键盘
-            keyboard = None
-            if keyboard_buttons:
-                keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-            
+
+            # 追加“我已加入”检测按钮
+            keyboard_rows.append([
+                InlineKeyboardButton(text="✅ 我已加入", callback_data="subscription_check")
+            ])
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_rows) if keyboard_rows else None
+
             # 发送消息
             await message.answer(text=message_text, reply_markup=keyboard)
             logger.info(f"已向用户 {message.from_user.id} 发送频道订阅提醒")
