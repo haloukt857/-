@@ -218,10 +218,14 @@ async def orders_list(request: Request):
                                 Td(f"#{order.get('customer_user_id', '-')} - {order.get('customer_username', '未设置')}"),
                                 Td(price_with_suffix(order), cls="font-semibold text-success font-mono"),
                                 Td(
-                                    Span(
-                                        OrderMgmtService.get_status_icon(order.get('status', '')),
-                                        OrderMgmtService.get_status_display(order.get('status', '')),
-                                        cls=f"badge badge-lg {OrderMgmtService.get_status_color(order.get('status', ''))} gap-1"
+                                    Div(
+                                        Span(
+                                            OrderMgmtService.get_status_icon(order.get('ui_status') or order.get('status', '')),
+                                            OrderMgmtService.get_status_display(order.get('ui_status') or order.get('status', '')),
+                                            cls=f"badge badge-lg {OrderMgmtService.get_status_color(order.get('ui_status') or order.get('status', ''))} gap-1"
+                                        ),
+                                        *([Div(f"原始状态：{OrderMgmtService.get_status_display(order.get('status',''))}", cls="text-xs text-gray-500 mt-1")] if (order.get('ui_status') and order.get('ui_status') != order.get('status')) else []),
+                                        cls="flex flex-col"
                                     )
                                 ),
                                 Td(order.get('appointment_time', '未设置')),
@@ -351,10 +355,14 @@ async def order_detail(request: Request):
             Div(
                 Div("订单状态", cls="stat-title"),
                 Div(
-                    Span(
-                        status_info['icon'],
-                        status_info['display_name'], 
-                        cls=f"badge badge-lg {status_info['color']} gap-2"
+                    Div(
+                        Span(
+                            status_info['icon'],
+                            status_info['display_name'], 
+                            cls=f"badge badge-lg {status_info['color']} gap-2"
+                        ),
+                        *([Div(f"原始状态：{status_info.get('original','-')}", cls="text-xs text-gray-500 mt-1")] if status_info.get('original') else []),
+                        cls="flex flex-col"
                     ),
                     cls="stat-value text-sm"
                 ),

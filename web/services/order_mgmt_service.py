@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 # 导入数据库管理器
 from database.db_orders import OrderManager
+from database.db_connection import db_manager
 from database.db_merchants import merchant_manager
 from database.db_users import user_manager
 from database.db_reviews import ReviewManager
@@ -45,6 +46,9 @@ class OrderMgmtService:
         "已评价": "badge-info",
         "双方评价": "badge-primary",
         "单方评价": "badge-secondary",
+        # 展示口径（只读）
+        "单方面的用户评价": "badge-info",
+        "单方面的老师评价": "badge-accent",
     }
     
     STATUS_ICONS = {
@@ -53,6 +57,9 @@ class OrderMgmtService:
         "已评价": "⭐",
         "双方评价": "🤝",
         "单方评价": "📝",
+        # 展示口径（只读）
+        "单方面的用户评价": "👤",
+        "单方面的老师评价": "🏪",
     }
     
     @staticmethod
@@ -104,6 +111,16 @@ class OrderMgmtService:
                 date_to=date_to
             )
             
+            # 计算“展示口径状态”（不写库，仅展示）
+            try:
+                order_ids = [o.get('id') for o in orders] if orders else []
+                ui_status_map = await OrderMgmtService._get_ui_status_map(order_ids)
+                for o in orders:
+                    o['ui_status'] = ui_status_map.get(o.get('id')) or o.get('status')
+                    o['original_status'] = o.get('status')
+            except Exception as _e:
+                logger.debug(f"计算展示状态失败（忽略）：{_e}")
+
             # 获取订单统计（添加今日订单统计）
             order_stats = await OrderMgmtService._get_order_statistics()
             today_orders = await OrderMgmtService._get_today_orders_count()
@@ -157,6 +174,44 @@ class OrderMgmtService:
                 'success': False,
                 'error': str(e)
             }
+
+    @staticmethod
+    async def _get_ui_status_map(order_ids: List[int]) -> Dict[int, str]:
+        """根据评价确认情况生成订单的“展示口径状态”。
+
+        规则（仅展示，不写库）：
+        - 用户评价确认 → 已评价
+        - 商户评价确认 → 单方评价
+        - 两边都确认 → 双方评价
+        - 否则 → 维持原始状态
+        """
+        try:
+            if not order_ids:
+                return {}
+            placeholders = ','.join(['?'] * len(order_ids))
+            # U2M 用户评价确认
+            sql_user = f"SELECT DISTINCT order_id FROM reviews WHERE is_confirmed_by_admin = 1 AND order_id IN ({placeholders})"
+            rows_u = await db_manager.fetch_all(sql_user, tuple(order_ids))
+            user_set = {int(r['order_id']) for r in rows_u} if rows_u else set()
+            # M2U 商户评价确认
+            sql_mer = f"SELECT DISTINCT order_id FROM merchant_reviews WHERE is_confirmed_by_admin = 1 AND order_id IN ({placeholders})"
+            rows_m = await db_manager.fetch_all(sql_mer, tuple(order_ids))
+            merchant_set = {int(r['order_id']) for r in rows_m} if rows_m else set()
+            # 合成展示状态
+            result: Dict[int, str] = {}
+            for oid in order_ids:
+                u = oid in user_set
+                m = oid in merchant_set
+                if u and m:
+                    result[oid] = '双方评价'
+                elif u:
+                    result[oid] = '单方面的用户评价'
+                elif m:
+                    result[oid] = '单方面的老师评价'
+            return result
+        except Exception as e:
+            logger.error(f"生成展示状态映射失败: {e}")
+            return {}
     
     @staticmethod
     async def get_order_detail(order_id: int) -> Dict[str, Any]:
@@ -186,16 +241,21 @@ class OrderMgmtService:
             
             # 获取相关评价
             reviews = await review_manager.get_reviews_by_order_id(order_id)
-            
+
+            # 展示口径状态（只读）
+            ui_map = await OrderMgmtService._get_ui_status_map([order_id])
+            ui_status = ui_map.get(order_id) or order.get('status')
+
             return {
                 'order': order,
                 'merchant': merchant,
                 'user': user,
                 'reviews': reviews,
                 'status_info': {
-                    'display_name': OrderMgmtService.STATUS_DISPLAY_MAP.get(order.get('status'), '未知'),
-                    'color': OrderMgmtService.STATUS_COLORS.get(order.get('status'), 'ghost'),
-                    'icon': OrderMgmtService.STATUS_ICONS.get(order.get('status'), '❓')
+                    'display_name': OrderMgmtService.STATUS_DISPLAY_MAP.get(ui_status, '未知'),
+                    'color': OrderMgmtService.STATUS_COLORS.get(ui_status, 'ghost'),
+                    'icon': OrderMgmtService.STATUS_ICONS.get(ui_status, '❓'),
+                    'original': OrderMgmtService.STATUS_DISPLAY_MAP.get(order.get('status'), '未知')
                 },
                 'success': True
             }

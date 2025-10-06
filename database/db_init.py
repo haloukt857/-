@@ -26,7 +26,7 @@ class DatabaseInitializer:
     
     def __init__(self):
         """初始化数据库初始化器"""
-        self.current_schema_version = "2025.10.04.1"
+        self.current_schema_version = "2025.10.04.2"
         self.migrations_dir = PathManager.get_database_migration_path()
         self.migration_history = []
     
