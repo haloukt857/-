@@ -103,43 +103,53 @@ def create_layout(title: str, content, show_nav: bool = True, include_charts: bo
         show_nav: 是否显示导航
         include_charts: 是否包含Chart.js库（用于数据分析页面）
     """
-    # 菜单项定义
-    menu_items = [
+    # 一级主导航（高频）
+    primary_items = [
         ("仪表板", "/", "/"),
+        ("订单管理", "/orders", "/orders"),
+        ("评价管理", "/reviews", "/reviews"),
+        ("绑定码", "/binding-codes", "/binding-codes"),
         ("商户管理", "/merchants", "/merchants"),
         ("帖子管理", "/posts", "/posts"),
+    ]
+
+    # 下拉：等级系统（包含用户中心/用户分析/等级配置）
+    rank_menu_items = [
+        ("用户中心", "/users", "/users"),
+        ("用户分析", "/users/analytics", "/users/analytics"),
+        ("等级配置", "/incentives", "/incentives"),
+    ]
+
+    # 下拉：配置中心
+    config_menu_items = [
         ("时间配置", "/schedule/time-slots", "/schedule/time-slots"),
         ("频道配置", "/channels/config", "/channels/config"),
         ("模板管理", "/templates", "/templates"),
-        ("自动回复", "/auto-reply", "/auto-reply"),
-        ("订单管理", "/orders", "/orders"),
-        ("评价管理", "/reviews", "/reviews"),
         ("订阅验证", "/subscription", "/subscription"),
-        ("绑定码", "/binding-codes", "/binding-codes"),
+        ("自动回复", "/auto-reply", "/auto-reply"),
         ("地区管理", "/regions", "/regions"),
-        ("激励系统", "/incentives", "/incentives"),
     ]
     
-    # 用户中心子菜单
-    user_submenu = [
-        ("用户列表", "/users", "/users"),
-        ("用户分析", "/users/analytics", "/users/analytics"),
-    ]
-    
-    # 创建菜单项的函数
+    # 取消“营销中心”
+
+    # 下拉：更多（已取消）
+
+    def _dropdown(title: str, items: list):
+        return Details(
+            Summary(title),
+            Ul(*[Li(A(n, href=h, **{"data-href": d})) for n, h, d in items])
+        )
+
+    # 创建菜单项（桌面与移动共用）
     def create_menu_items(for_mobile=False):
         items = []
-        for name, href, data_href in menu_items:
+        # 一级项
+        for name, href, data_href in primary_items:
             items.append(Li(A(name, href=href, **{"data-href": data_href})))
-        
-        # 添加用户中心下拉菜单
-        user_menu = Details(
-            Summary("用户中心"),
-            Ul(
-                *[Li(A(name, href=href, **{"data-href": data_href})) for name, href, data_href in user_submenu]
-            )
-        )
-        items.insert(4, Li(user_menu))  # 在订单管理后插入
+        # 下拉：等级系统/配置中心
+        items.append(Li(_dropdown("等级系统", rank_menu_items)))
+        items.append(Li(_dropdown("配置中心", config_menu_items)))
+        # 已取消“更多”分组
         return items
     
     nav = Nav(

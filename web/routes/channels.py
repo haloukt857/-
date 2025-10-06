@@ -89,8 +89,8 @@ async def channel_config_page(request: Request):
                     Option('商户→用户评价 (m2u)', value='review_m2u'),
                     name='role', cls='select select-bordered select-sm w-60 ml-2'
                 ), cls='form-control'),
-                Button('新增并设为当前', type='submit', cls='btn btn-sm btn-primary ml-2'),
-                cls='flex items-center gap-2 flex-wrap'
+                Div(Button('新增并设为当前', type='submit', cls='btn btn-sm btn-primary'), cls='form-control'),
+                cls='flex items-end gap-3 flex-wrap'
             ),
             method='post', action='/channels/config', cls='mb-4'
         )

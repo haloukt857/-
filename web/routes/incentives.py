@@ -1083,8 +1083,9 @@ async def levels_create_post(request: Request):
             raise Exception("经验值必须是非负整数")
         
         # 解析升级奖励积分
+        points_raw = form_data.get('points_on_level_up', '0')
         try:
-            points_on_level_up = int(points_on_level_up)
+            points_on_level_up = int(points_raw or '0')
             if points_on_level_up < 0:
                 raise ValueError
         except ValueError:
@@ -1282,8 +1283,9 @@ async def levels_edit_post(request: Request):
             raise Exception("经验值必须是非负整数")
         
         # 解析升级奖励积分
+        points_raw = form_data.get('points_on_level_up', '0')
         try:
-            points_on_level_up = int(points_on_level_up)
+            points_on_level_up = int(points_raw or '0')
             if points_on_level_up < 0:
                 raise ValueError
         except ValueError:
