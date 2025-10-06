@@ -111,6 +111,7 @@ def create_layout(title: str, content, show_nav: bool = True, include_charts: bo
         ("时间配置", "/schedule/time-slots", "/schedule/time-slots"),
         ("频道配置", "/channels/config", "/channels/config"),
         ("模板管理", "/templates", "/templates"),
+        ("自动回复", "/auto-reply", "/auto-reply"),
         ("订单管理", "/orders", "/orders"),
         ("评价管理", "/reviews", "/reviews"),
         ("订阅验证", "/subscription", "/subscription"),
@@ -287,9 +288,23 @@ def create_layout(title: str, content, show_nav: bool = True, include_charts: bo
             )
         ]
 
+    # 固定在页面最左上角的品牌标识（不嵌入导航容器）
+    brand_badge = Div(
+        Div(
+            A("好色仙人系统", href="/", cls="font-semibold text-base lg:text-lg leading-tight text-gray-200 hover:text-white whitespace-nowrap"),
+        ),
+        Div(
+            A("TG: @Jiraiya_system", href="https://t.me/Jiraiya_system", target="_blank",
+              cls="text-xs lg:text-sm text-gray-400 hover:text-gray-200 whitespace-nowrap"),
+        ),
+        cls="flex flex-col items-start",
+        style="position:fixed;left:8px;top:10px;z-index:10000;line-height:1.1;"
+    )
+
     return Html(
         Head(*head_elements),
         Body(
+            brand_badge,
             nav,
             Div(
                 content,

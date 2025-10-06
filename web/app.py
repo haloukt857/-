@@ -175,6 +175,16 @@ app.post("/subscription/toggle")(subscription.subscription_toggle_post)
 app.post("/subscription/channels/add")(subscription.subscription_add_channel_post)
 app.post("/subscription/channels/remove")(subscription.subscription_remove_channel_post)
 
+# 自动回复管理路由
+from .routes import auto_reply
+app.get("/auto-reply")(auto_reply.auto_reply_dashboard)
+app.post("/auto-reply/triggers/create")(auto_reply.trigger_create_post)
+app.post("/auto-reply/triggers/{trigger_id:int}/update")(auto_reply.trigger_update_post)
+app.post("/auto-reply/triggers/{trigger_id:int}/delete")(auto_reply.trigger_delete_post)
+app.post("/auto-reply/messages/create")(auto_reply.message_create_post)
+app.post("/auto-reply/messages/{message_id:int}/update")(auto_reply.message_update_post)
+app.post("/auto-reply/messages/{message_id:int}/delete")(auto_reply.message_delete_post)
+
 # 绑定码管理路由
 app.get("/binding-codes")(binding_codes.binding_codes_list)
 app.get("/binding-codes/generate")(binding_codes.binding_codes_generate_page)

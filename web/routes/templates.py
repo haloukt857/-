@@ -99,7 +99,7 @@ async def templates_list(request: Request):
         )
 
         content = Div(
-            Div(H1("模板管理"), cls="page-header"),
+            H1("模板管理", cls="page-title"),
             Div(filter_form, cls="card bg-base-100 p-4 shadow mb-4"),
             stats_cards,
             Div(table, cls="overflow-x-auto card bg-base-100 p-4 shadow"),
@@ -122,7 +122,7 @@ async def template_new(request: Request):
         Div(Button("创建模板", type="submit", cls="btn btn-primary"), A("取消", href="/templates", cls="btn ml-2"), cls="flex justify-end mt-4"),
         method="post", action="/templates/create"
     )
-    return create_layout("新建模板", Div(Div(H1("新建模板"), cls="page-header"), form, cls="page-content"))
+    return create_layout("新建模板", Div(H1("新建模板", cls="page-title"), form, cls="page-content"))
 
 
 @require_auth
@@ -158,7 +158,7 @@ async def template_edit(request: Request, key: str):
             Div(Button("保存", type="submit", cls="btn btn-primary"), A("返回列表", href="/templates", cls="btn ml-2"), cls="flex justify-end mt-4"),
             method="post", action=f"/templates/{key}/update"
         )
-        return create_layout("编辑模板", Div(Div(H1(f"编辑模板 - {key}"), cls="page-header"), form, cls="page-content"))
+        return create_layout("编辑模板", Div(H1(f"编辑模板 - {key}", cls="page-title"), form, cls="page-content"))
     except Exception as e:
         logger.error(f"编辑模板页面失败: {e}")
         return create_layout("错误", Div(P("加载失败")))
@@ -187,4 +187,3 @@ async def template_delete(request: Request, key: str):
     except Exception as e:
         logger.error(f"删除模板失败: {e}")
         return RedirectResponse(url="/templates", status_code=302)
-
