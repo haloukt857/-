@@ -240,9 +240,12 @@ async def view_channel_callback(callback: CallbackQuery):
         ch = merchant.get('channel_chat_id') or merchant.get('channel_link')
         if isinstance(ch, str):
             link = ch if ch.startswith('http') else f"https://t.me/{ch.lstrip('@')}"
+            # 为避免 Markdown/HTML 解析错误（频道名中包含下划线等），不在文本中直接放链接，改为按钮跳转
             from aiogram.types import LinkPreviewOptions
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📣 打开频道", url=link)]])
             await callback.message.answer(
-                f"📣 打开频道：{link}",
+                "📣 点击下方按钮打开频道",
+                reply_markup=kb,
                 parse_mode=None,
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
