@@ -947,6 +947,25 @@ class DatabaseInitializer:
                         logger.info("🔧 已更新 merchant_help_existing 模板为“我的资料”引导")
             except Exception as e:
                 logger.debug(f"模板兼容修正跳过: {e}")
+
+            # 兼容性修正：将 user_profile_card 中的字面量 "\\n"、"\\t" 迁移为真实换行/制表符
+            try:
+                row2 = await db_manager.fetch_one(
+                    "SELECT content FROM templates WHERE key = ?",
+                    ('user_profile_card',)
+                )
+                if row2:
+                    raw = row2['content'] if isinstance(row2, dict) else row2[0]
+                    if isinstance(raw, str) and ("\\n" in raw or "\\t" in raw):
+                        fixed = raw.replace("\\n", "\n").replace("\\t", "\t")
+                        if fixed != raw:
+                            await db_manager.execute_query(
+                                "UPDATE templates SET content = ? WHERE key = ?",
+                                (fixed, 'user_profile_card')
+                            )
+                            logger.info("🔧 已将 user_profile_card 模板中的\\n/\\t 迁移为真实换行/制表符")
+            except Exception as e:
+                logger.debug(f"user_profile_card 模板换行修正跳过: {e}")
             return True
 
     def generate_migration_file(self, description: str) -> str:

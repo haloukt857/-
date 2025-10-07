@@ -670,6 +670,11 @@ async def profile_command(message: Message, override_user=None):
     try:
         if await template_manager.template_exists('user_profile_card'):
             tpl = await template_manager.get_template('user_profile_card')
+            # 兼容历史模板中的转义换行符（\n）：渲染前后做一次标准化
+            try:
+                tpl = tpl.replace('\\n', '\n').replace('\\t', '\t')
+            except Exception:
+                pass
             profile_card = tpl.format(
                 user_id=profile.get('user_id', ''),
                 username=profile.get('username', ''),
@@ -711,7 +716,8 @@ async def profile_command(message: Message, override_user=None):
         [InlineKeyboardButton(text="🗒️ 我的出击记录", callback_data="my_attack_records")],
         [InlineKeyboardButton(text="📈 查看排行榜", callback_data="user_rank_menu")]
     ])
-    await message.answer(profile_card, reply_markup=kb, parse_mode="Markdown")
+    # 纯文本展示，避免 Markdown 对分隔线/符号的误解析
+    await message.answer(profile_card, reply_markup=kb, parse_mode=None)
 
 
 @router.callback_query(F.data == "my_attack_records")
