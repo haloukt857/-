@@ -281,24 +281,11 @@ async def order_now_callback(callback: CallbackQuery):
             await callback.message.edit_reply_markup(reply_markup=back_kb)
         except Exception:
             pass
-        # 用户确认文案（统一固定内容）
-        admin_display = "@admin"
-        try:
-            if ADMIN_IDS:
-                first_admin = ADMIN_IDS[0]
-                try:
-                    admin_chat = await callback.bot.get_chat(first_admin)
-                    if getattr(admin_chat, 'username', None):
-                        admin_display = f"@{admin_chat.username}"
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
+        # 用户确认文案（统一固定内容，移除硬编码管理员账号）
         confirm_text = (
             "✅ 榜上老师均已通过认证\n\n"
             "📅 请放心预约。\n\n"
-            f"🙋🏻 有任何问题及时联系管理员 {admin_display}\n\n"
+            "🙋🏻 有任何问题及时联系管理员\n\n"
             "✍️ 写真实评价会获得积分哦～ \n\n"
             "🥇 还可以请老师返评你的出击表现，可以在机器人内查看排行榜。"
         )
@@ -306,7 +293,13 @@ async def order_now_callback(callback: CallbackQuery):
             [InlineKeyboardButton(text="预约P课程", callback_data=f"order_choose_p_{merchant_id}_{order_id}")],
             [InlineKeyboardButton(text="预约PP课程", callback_data=f"order_choose_pp_{merchant_id}_{order_id}")],
         ])
-        await callback.message.answer(confirm_text, reply_markup=choose_kb, parse_mode=None)
+        from aiogram.types import LinkPreviewOptions
+        await callback.message.answer(
+            confirm_text,
+            reply_markup=choose_kb,
+            parse_mode=None,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
         # 商户通知改到用户选择 P/PP 后进行
     except Exception as e:
