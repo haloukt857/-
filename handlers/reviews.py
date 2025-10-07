@@ -594,14 +594,34 @@ async def on_admin_confirm(cb: CallbackQuery):
                 try:
                     if direction == 'u2m':
                         if user_id:
-                            await cb.message.bot.send_message(int(user_id), f"📣 你的评价已发布到频道\n🔗 {link}")
+                            from aiogram.types import LinkPreviewOptions
+                            await cb.message.bot.send_message(
+                                int(user_id),
+                                f"📣 你的评价已发布到频道\n🔗 {link}",
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                            )
                         if merchant_chat_id:
-                            await cb.message.bot.send_message(int(merchant_chat_id), f"📣 有用户对你提交了评价，已发布到频道\n🔗 {link}")
+                            from aiogram.types import LinkPreviewOptions
+                            await cb.message.bot.send_message(
+                                int(merchant_chat_id),
+                                f"📣 有用户对你提交了评价，已发布到频道\n🔗 {link}",
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                            )
                     else:
                         if merchant_chat_id:
-                            await cb.message.bot.send_message(int(merchant_chat_id), f"📣 你的评价已发布到频道\n🔗 {link}")
+                            from aiogram.types import LinkPreviewOptions
+                            await cb.message.bot.send_message(
+                                int(merchant_chat_id),
+                                f"📣 你的评价已发布到频道\n🔗 {link}",
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                            )
                         if user_id:
-                            await cb.message.bot.send_message(int(user_id), f"📣 商家/老师对你提交了评价，已发布到频道\n🔗 {link}")
+                            from aiogram.types import LinkPreviewOptions
+                            await cb.message.bot.send_message(
+                                int(user_id),
+                                f"📣 商家/老师对你提交了评价，已发布到频道\n🔗 {link}",
+                                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                            )
                 except Exception:
                     pass
         try:
@@ -657,24 +677,44 @@ async def on_admin_publish(cb: CallbackQuery):
                 # 用户评价商户：通知用户与商户
                 if user_id:
                     try:
-                        await cb.message.bot.send_message(int(user_id), f"📣 你的评价已发布到频道\n🔗 {link}")
+                        from aiogram.types import LinkPreviewOptions
+                        await cb.message.bot.send_message(
+                            int(user_id),
+                            f"📣 你的评价已发布到频道\n🔗 {link}",
+                            link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        )
                     except Exception:
                         pass
                 if merchant_chat_id:
                     try:
-                        await cb.message.bot.send_message(int(merchant_chat_id), f"📣 有用户对你提交了评价，已发布到频道\n🔗 {link}")
+                        from aiogram.types import LinkPreviewOptions
+                        await cb.message.bot.send_message(
+                            int(merchant_chat_id),
+                            f"📣 有用户对你提交了评价，已发布到频道\n🔗 {link}",
+                            link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        )
                     except Exception:
                         pass
             else:
                 # 商户评价用户：通知商户与用户
                 if merchant_chat_id:
                     try:
-                        await cb.message.bot.send_message(int(merchant_chat_id), f"📣 你的评价已发布到频道\n🔗 {link}")
+                        from aiogram.types import LinkPreviewOptions
+                        await cb.message.bot.send_message(
+                            int(merchant_chat_id),
+                            f"📣 你的评价已发布到频道\n🔗 {link}",
+                            link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        )
                     except Exception:
                         pass
                 if user_id:
                     try:
-                        await cb.message.bot.send_message(int(user_id), f"📣 商家/老师对你提交了评价，已发布到频道\n🔗 {link}")
+                        from aiogram.types import LinkPreviewOptions
+                        await cb.message.bot.send_message(
+                            int(user_id),
+                            f"📣 商家/老师对你提交了评价，已发布到频道\n🔗 {link}",
+                            link_preview_options=LinkPreviewOptions(is_disabled=True),
+                        )
                     except Exception:
                         pass
         except Exception as e:

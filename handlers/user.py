@@ -240,7 +240,12 @@ async def view_channel_callback(callback: CallbackQuery):
         ch = merchant.get('channel_chat_id') or merchant.get('channel_link')
         if isinstance(ch, str):
             link = ch if ch.startswith('http') else f"https://t.me/{ch.lstrip('@')}"
-            await callback.message.answer(f"📣 打开频道：{link}")
+            from aiogram.types import LinkPreviewOptions
+            await callback.message.answer(
+                f"📣 打开频道：{link}",
+                parse_mode=None,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
     except Exception as e:
         logger.error(f"查看频道失败: {e}")
         await callback.message.answer("打开频道失败，请稍后重试")
@@ -343,7 +348,12 @@ async def order_choose_callback(callback: CallbackQuery):
             f"▌\n"
             f"▌请主动联系私聊～"
         )
-        await callback.message.answer(text, disable_web_page_preview=False, parse_mode=None)
+        from aiogram.types import LinkPreviewOptions
+        await callback.message.answer(
+            text,
+            parse_mode=None,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
         # 发送“完成后评价”入口（用户端）
         try:
@@ -441,7 +451,13 @@ async def start_command(message: Message, state: FSMContext):
                 return
             html = await _render_channel_post_html(merchant)
             kb = create_merchant_detail_keyboard(merchant)
-            await message.answer(html, reply_markup=kb, parse_mode='MarkdownV2')
+            from aiogram.types import LinkPreviewOptions
+            await message.answer(
+                html,
+                reply_markup=kb,
+                parse_mode='MarkdownV2',
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
             return
         except Exception as e:
             logger.warning(f"m_ 解析失败: {e}")
@@ -641,7 +657,13 @@ async def profile_command(message: Message, override_user=None):
             [InlineKeyboardButton(text=("管理媒体（已有6张）" if media_count >= 6 else f"管理媒体（{media_count}/6）"), callback_data="merchant_edit_media")],
             [InlineKeyboardButton(text=submit_label, callback_data="merchant_submit_review")],
         ])
-        sent = await message.answer(html_preview, reply_markup=kb, parse_mode='MarkdownV2')
+        from aiogram.types import LinkPreviewOptions
+        sent = await message.answer(
+            html_preview,
+            reply_markup=kb,
+            parse_mode='MarkdownV2',
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
         # 记录面板消息ID，便于后续编辑而不是追加
         try:
             state_name, data = await _fsm_db_profile.load_user_state(user_id)
@@ -760,7 +782,12 @@ async def my_attack_records_callback(callback: CallbackQuery):
             line = f"{idx}. {ts}  订单#{d['order_id']}  {d.get('merchant_name','-')}  价格: ¥{price}{suffix}\n   报告: {link}"
             lines.append(line)
         text = "\n".join(lines)
-        await callback.message.answer(text)
+        from aiogram.types import LinkPreviewOptions
+        await callback.message.answer(
+            text,
+            parse_mode=None,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
         await callback.answer()
     except Exception as e:
         logger.error(f"加载出击记录失败: {e}")
@@ -814,7 +841,12 @@ async def merchant_attack_records_callback(callback: CallbackQuery):
             line = f"{idx}. {ts}  订单#{d['order_id']}  用户: {uname}  价格: ¥{price}{suffix}\n   报告: {link}"
             lines.append(line)
         text = "\n".join(lines)
-        await callback.message.answer(text)
+        from aiogram.types import LinkPreviewOptions
+        await callback.message.answer(
+            text,
+            parse_mode=None,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
         await callback.answer()
     except Exception as e:
         logger.error(f"加载商户服务记录失败: {e}")

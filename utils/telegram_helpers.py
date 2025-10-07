@@ -35,11 +35,27 @@ async def safe_edit_message(message, new_content: str, reply_markup=None, parse_
             logger.debug("消息内容未改变，跳过更新")
             return True
             
-        await message.edit_text(
-            new_content, 
-            reply_markup=reply_markup, 
-            parse_mode=parse_mode
-        )
+        # 统一禁用链接预览，避免触发官方预览卡片
+        try:
+            await message.edit_text(
+                new_content,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+                disable_web_page_preview=True,
+            )
+        except TypeError:
+            # 兼容旧版/新参数名（aiogram>=3 使用 link_preview_options）
+            try:
+                from aiogram.types import LinkPreviewOptions  # type: ignore
+                await message.edit_text(
+                    new_content,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            except Exception as e2:
+                logger.error(f"更新消息时设置禁用预览失败: {e2}")
+                raise
         return True
         
     except Exception as e:
