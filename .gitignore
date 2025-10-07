@@ -60,3 +60,8 @@ playwright/.cache/
 # OS
 Thumbs.db
 ehthumbs.db
+
+# Secrets (do not track)
+.sesskey
+cookie.txt
+cookies.txt
