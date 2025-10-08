@@ -321,6 +321,9 @@ class MerchantManager:
             if status:
                 conditions.append("m.status = ?")
                 params.append(status)
+            else:
+                # 帖子管理默认不展示“待提交”（包括被软删除清空的商户）
+                conditions.append("m.status <> 'pending_submission'")
             
             if search:
                 # 支持名称模糊搜索和ID精确搜索

@@ -11,6 +11,12 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
+
+# 确保项目根目录在 sys.path 中，便于导入 pathmanager 等本地模块
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from pathmanager import PathManager
 from database.db_connection import db_manager
@@ -53,4 +59,3 @@ if __name__ == "__main__":
         print("已取消。")
         sys.exit(0)
     asyncio.run(hard_reset_and_init())
-

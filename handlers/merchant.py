@@ -322,17 +322,27 @@ class BindingFlowManager:
                 elif step_number == 9:
                     # 先选择最近5天日期，再选择管理员配置的时间
                     from datetime import datetime, timedelta
+                    # 使用中文星期显示，避免 %a 在不同系统上显示英文缩写
+                    def _weekday_cn(dt: datetime) -> str:
+                        names = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+                        try:
+                            return names[dt.weekday()]
+                        except Exception:
+                            return ''
                     days = []
                     for i in range(0, 5):
                         d = datetime.now() + timedelta(days=i)
-                        days.append({"text": d.strftime("%m-%d (%a)"), "value": d.strftime("%Y-%m-%d")})
+                        days.append({
+                            "text": f"{d.strftime('%m-%d')} ({_weekday_cn(d)})",
+                            "value": d.strftime("%Y-%m-%d")
+                        })
                     # 日期按钮
                     for d in days:
                         prefix = "✅ " if user_choices.get('publish_date') == d['value'] else ""
                         buttons.append([InlineKeyboardButton(text=f"{prefix}{d['text']}", callback_data=f"binding_pickdate_{d['value']}")])
                     # 时间槽
                     if user_choices.get('publish_date') and options:
-                        buttons.append([InlineKeyboardButton(text="— 选择时间 —", callback_data="noop")])
+                        buttons.append([InlineKeyboardButton(text="🔴 请选择具体时间", callback_data="noop")])
                         # 查询该日期已被占用的时间槽
                         try:
                             from database.db_merchants import MerchantManager as _MM

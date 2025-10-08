@@ -331,6 +331,19 @@ CREATE INDEX IF NOT EXISTS idx_reviews_customer_user_id ON reviews(customer_user
 CREATE INDEX IF NOT EXISTS idx_reviews_merchant_id ON reviews(merchant_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_created_at ON reviews(created_at);
 
+-- 频道贴文记录（每条频道消息一行，用于后续编辑/删除）
+CREATE TABLE IF NOT EXISTS merchant_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    merchant_id INTEGER NOT NULL,
+    chat_id TEXT NOT NULL,              -- '@username' 或 '-100xxxxxxxxx'
+    message_id INTEGER NOT NULL,
+    post_url TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_merchant_posts_mid ON merchant_posts(merchant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_merchant_posts_unique ON merchant_posts(merchant_id, chat_id, message_id);
+
 -- 绑定码表索引
 CREATE INDEX IF NOT EXISTS idx_binding_codes_code ON binding_codes(code);
 CREATE INDEX IF NOT EXISTS idx_binding_codes_expires_at ON binding_codes(expires_at);

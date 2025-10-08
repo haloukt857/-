@@ -21,6 +21,8 @@ from database.db_merchants import merchant_manager
 from database.db_media import media_db
 from utils.caption_renderer import render_channel_caption_md, render_channel_caption_html
 from starlette.responses import HTMLResponse
+from urllib.parse import quote_plus as url_quote
+from ..components.indicators import notification_toast
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,21 @@ def get_posts_status_color(status: str) -> str:
     return color_map.get(status, "badge-ghost")
 
 
+def get_effective_status(status: str, expiration_time=None) -> str:
+    """根据到期时间计算“有效状态”。
+    - 若原状态为 published 且当前时间已超过到期时间，则视为 expired。
+    - 其他状态保持不变。
+    """
+    try:
+        if status == 'published':
+            et = _parse_dt_like(expiration_time)
+            if et is not None and datetime.now() >= et:
+                return 'expired'
+    except Exception:
+        pass
+    return status
+
+
 @require_auth
 async def post_caption_preview(request: Request, post_id: int):
     """Caption 预览（上方文字纯服务端 HTML，保留媒体区逻辑在外层页面）。"""
@@ -122,10 +139,33 @@ async def post_caption_preview(request: Request, post_id: int):
         logger.error(f"caption预览失败: {e}")
         return '<div style="padding:8px;color:#f00;">预览失败</div>'
 
-def generate_posts_quick_action_buttons(post_id: str, current_status: str) -> list:
-    """根据当前状态生成快速操作按钮"""
+def _parse_dt_like(value):
+    """宽松解析日期时间字符串，失败返回 None。"""
+    try:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            s = value.strip().replace('T', ' ').replace('Z', '')
+            # 去掉小数秒
+            if '.' in s:
+                s = s.split('.', 1)[0]
+            # 补全到秒的两种常见格式
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+                try:
+                    return datetime.strptime(s, fmt)
+                except Exception:
+                    pass
+    except Exception:
+        return None
+    return None
+
+
+def generate_posts_quick_action_buttons(post_id: str, current_status: str, expiration_time=None) -> list:
+    """根据当前状态生成快速操作按钮；若已到过期时间，显示“已过期”。"""
     buttons = []
-    
+
     if current_status == 'pending_approval':
         buttons.extend([
             Form(
@@ -137,7 +177,7 @@ def generate_posts_quick_action_buttons(post_id: str, current_status: str) -> li
                 method="post", action=f"/posts/{post_id}/reject"
             )
         ])
-    
+
     elif current_status == 'approved':
         buttons.extend([
             Form(
@@ -150,20 +190,49 @@ def generate_posts_quick_action_buttons(post_id: str, current_status: str) -> li
                 method="post", action=f"/posts/{post_id}/extend"
             )
         ])
-    
+
     elif current_status == 'published':
+        # 判断是否已到过期时间（即便状态仍为“已发布”）
+        et = _parse_dt_like(expiration_time)
+        now = datetime.now()
+        is_expired_by_time = (et is not None and now >= et)
+
+        if is_expired_by_time:
+            # 替换“设为过期”为不可点的“已过期”
+            buttons.extend([
+                Button("已过期", cls="btn btn-disabled btn-xs", disabled=True),
+                Form(
+                    Button("延长1天", type="submit", cls="btn btn-ghost btn-xs"),
+                    Input(type="hidden", name="days", value="1"),
+                    method="post", action=f"/posts/{post_id}/extend"
+                )
+            ])
+        else:
+            buttons.extend([
+                Form(
+                    Button("设为过期", type="submit", cls="btn btn-warning btn-xs"),
+                    method="post", action=f"/posts/{post_id}/expire"
+                ),
+                Form(
+                    Button("延长1天", type="submit", cls="btn btn-ghost btn-xs"),
+                    Input(type="hidden", name="days", value="1"),
+                    method="post", action=f"/posts/{post_id}/extend"
+                )
+            ])
+    elif current_status == 'expired':
+        # 过期：允许重新发布或删除本轮帖子
         buttons.extend([
             Form(
-                Button("设为过期", type="submit", cls="btn btn-warning btn-xs"),
-                method="post", action=f"/posts/{post_id}/expire"
+                Button("重新发布", type="submit", cls="btn btn-success btn-xs"),
+                method="post", action=f"/posts/{post_id}/publish"
             ),
             Form(
-                Button("延长1天", type="submit", cls="btn btn-ghost btn-xs"),
-                Input(type="hidden", name="days", value="1"),
-                method="post", action=f"/posts/{post_id}/extend"
+                Button("删除帖子", type="submit", cls="btn btn-error btn-xs",
+                       onclick="return confirm('确认删除本轮帖子？商户资料与评价不会被删除。')"),
+                method="post", action=f"/posts/{post_id}/delete"
             )
         ])
-    
+
     return buttons
 
 
@@ -171,19 +240,34 @@ def generate_posts_quick_action_buttons(post_id: str, current_status: str) -> li
 async def posts_list(request: Request):
     """帖子管理页面"""
     try:
-        # 解析查询参数
+        # 解析查询参数（含一次性提示）
         params = dict(request.query_params)
+        info_msg = params.get('message') or ('帖子已删除（保留历史与ID）' if params.get('deleted') else None)
+        error_msg = params.get('error')
         page = int(params.get('page', 1))
         per_page = int(params.get('per_page', 20))
-        
-        # 筛选参数
-        status_filter = params.get('status', '')
-        district_filter = params.get('district', '')
+
+        # 筛选参数（规范化：将“全部*”与无效值折叠为 None）
+        def _norm_status(v: str | None):
+            if not v or v in ('_all', '全部状态', 'all'):
+                return None
+            allowed = set(POST_STATUS_DISPLAY_MAP.keys())
+            return v if v in allowed else None
+
+        def _norm_district(v: str | None):
+            if not v or v in ('_all', '全部地区', 'all'):
+                return None
+            return v if str(v).isdigit() else None
+
+        raw_status = params.get('status')
+        raw_district = params.get('district')
+        status_filter = _norm_status(raw_status)
+        district_filter = _norm_district(raw_district)
         search_query = params.get('search', '')
         sort_by = params.get('sort', 'publish_time')
-        kw_id = int(params.get('kw')) if params.get('kw') else None
-        price_p = int(params.get('price_p')) if params.get('price_p') else None
-        price_pp = int(params.get('price_pp')) if params.get('price_pp') else None
+        kw_id = int(params.get('kw')) if params.get('kw') and str(params.get('kw')).isdigit() else None
+        price_p = int(params.get('price_p')) if params.get('price_p') and str(params.get('price_p')).isdigit() else None
+        price_pp = int(params.get('price_pp')) if params.get('price_pp') and str(params.get('price_pp')).isdigit() else None
         
         # 调用服务层获取帖子数据，传递完整参数
         posts_data = await PostMgmtService.get_posts_list(
@@ -210,7 +294,7 @@ async def posts_list(request: Request):
                 Div(
                     Label("状态筛选", cls="label"),
                     Select(
-                        Option("全部状态", value="", selected=not status_filter),
+                        Option("全部状态", value="_all", selected=(status_filter is None)),
                         *[Option(posts_data.get('status_options', {}).get(k, k), value=k, selected=(status_filter==k)) for k in posts_data.get('status_options', {}).keys()],
                         name="status", cls="select select-bordered w-full"
                     ),
@@ -220,10 +304,10 @@ async def posts_list(request: Request):
                 Div(
                     Label("区县筛选", cls="label"),
                     Select(
-                        Option("全部地区", value="", selected=not district_filter),
+                        Option("全部地区", value="_all", selected=(district_filter is None)),
                         *[Option(f"{region.get('city_name', '')} - {region.get('name', '')}", 
                                value=str(region['id']),
-                               selected=district_filter==str(region['id'])) 
+                               selected=(district_filter==str(region['id']))) 
                           for region in regions],
                         name="district", cls="select select-bordered w-full"
                     ),
@@ -258,7 +342,7 @@ async def posts_list(request: Request):
                 ),
                 cls="flex items-end gap-3 flex-wrap"
             ),
-            method="get",
+            method="get", action="/posts",
             cls="card bg-base-100 shadow-xl p-4 mb-6"
         )
         
@@ -281,13 +365,17 @@ async def posts_list(request: Request):
             Tbody(
                 *[
                     Tr(
-                        Td(str(post['id']), cls="whitespace-nowrap text-sm"),
+                        Td(
+                            (Span("⭕️", cls="mr-1 text-lg align-middle") if post.get('status') == 'pending_approval' else ""),
+                            str(post['id']),
+                            cls="whitespace-nowrap text-sm"
+                        ),
                         Td(post.get('name', '未设置'), cls="whitespace-nowrap text-sm"),
                         Td(
-                            Span(
-                                POST_STATUS_DISPLAY_MAP.get(post['status'], post['status']),
-                                cls=f"badge badge-sm {get_posts_status_color(post['status'])}"
-                            )
+                            (lambda _st: Span(
+                                POST_STATUS_DISPLAY_MAP.get(_st, _st),
+                                cls=f"badge badge-sm {get_posts_status_color(_st)}"
+                            ))(get_effective_status(post['status'], post.get('expiration_time'))),
                         ),
                         Td(f"{post.get('city_name', '')} - {post.get('district_name', '')}", cls="whitespace-nowrap text-xs px-2 py-1"),
                         Td((post.get('channel_chat_id') or '-') if isinstance(post.get('channel_chat_id'), str) else '-', cls="whitespace-nowrap font-mono text-xs px-2 py-1"),
@@ -304,10 +392,10 @@ async def posts_list(request: Request):
                         Td(post.get('created_at', ''), cls="whitespace-nowrap text-xs px-2 py-1"),
                         Td(
                             Div(
-                                A("详情", href=f"/posts/{post['id']}", 
-                                  cls="btn btn-sm btn-info mr-1"),
+                                A("详情", href=f"/posts/{post['id']}", cls="btn btn-sm btn-info mr-1"),
+                                A("编辑", href=f"/posts/{post['id']}?mode=edit", cls="btn btn-sm btn-ghost mr-1"),
                                 *generate_posts_quick_action_buttons(
-                                    str(post['id']), post['status']
+                                    str(post['id']), post['status'], post.get('expiration_time')
                                 ),
                                 cls="flex gap-1 flex-nowrap justify-end"
                             )
@@ -327,7 +415,7 @@ async def posts_list(request: Request):
                 *[
                     A(
                         str(p),
-                        href=f"/posts?page={p}&per_page={per_page}&status={status_filter}&district={district_filter}&search={search_query}&sort={sort_by}",
+                        href=f"/posts?page={p}&per_page={per_page}&status={status_filter or '_all'}&district={district_filter or '_all'}&search={search_query}&sort={sort_by}",
                         cls=f"btn btn-sm {'btn-active' if p == page else 'btn-ghost'}"
                     )
                     for p in range(max(1, page-2), min(total_pages+1, page+3))
@@ -337,7 +425,21 @@ async def posts_list(request: Request):
             cls="flex justify-between items-center mt-4"
         ) if total_pages > 1 else Div()
         
+        # 顶部 Toast
+        toast_block = None
+        if error_msg:
+            toast_block = Div(
+                notification_toast("操作失败", str(error_msg), "error", 3500),
+                cls="toast toast-top toast-end"
+            )
+        elif info_msg:
+            toast_block = Div(
+                notification_toast("操作成功", str(info_msg), "success", 2500),
+                cls="toast toast-top toast-end"
+            )
+
         content = Div(
+            toast_block or "",
             # 页面头部
             Div(
                 H1("帖子管理", cls="page-title"),
@@ -455,9 +557,10 @@ async def post_detail(request: Request, post_id: int):
 
         if mode != 'edit':
             # 预览模式：只读信息 + 编辑/返回按钮
+            _eff_status = get_effective_status(post.get('status'), post.get('expiration_time'))
             status_badge = Span(
-                POST_STATUS_DISPLAY_MAP.get(post.get('status'), post.get('status')),
-                cls=f"badge {get_posts_status_color(post.get('status'))}"
+                POST_STATUS_DISPLAY_MAP.get(_eff_status, _eff_status),
+                cls=f"badge {get_posts_status_color(_eff_status)}"
             )
 
             # 计算频道用户名与链接
@@ -827,10 +930,10 @@ async def post_detail(request: Request, post_id: int):
                     Div(
                         Div(
                             Label("当前状态", cls="label"),
-                            Span(
-                                POST_STATUS_DISPLAY_MAP.get(post['status'], post['status']),
-                                cls=f"badge {get_posts_status_color(post['status'])} badge-lg"
-                            ),
+                            (lambda _st: Span(
+                                POST_STATUS_DISPLAY_MAP.get(_st, _st),
+                                cls=f"badge {get_posts_status_color(_st)} badge-lg"
+                            ))(get_effective_status(post['status'], post.get('expiration_time'))),
                             cls="form-control"
                         ),
                         Div(
@@ -859,13 +962,12 @@ async def post_detail(request: Request, post_id: int):
                 cls="space-y-6"
             ),
             
-            # 操作按钮
+            # 操作按钮（删除使用独立表单 + 二次确认）
             Div(
                 Button("保存修改", type="submit", cls="btn btn-primary"),
-                Form(
-                    Button("删除帖子", type="submit", cls="btn btn-error ml-2",
-                           onclick="return confirm('确定删除该帖子？此操作不可恢复');"),
-                    method="post", action=f"/posts/{post_id}/delete"
+                Button(
+                    "删除帖子", type="button", cls="btn btn-error ml-2",
+                    onclick=f"confirm_delete_post_{post_id}()"
                 ),
                 A("返回列表", href="/posts", cls="btn btn-ghost ml-2"),
                 cls="flex justify-end gap-2 mt-6"
@@ -895,7 +997,23 @@ async def post_detail(request: Request, post_id: int):
                 }});
               }}
             }})();
+            // 删除二次确认并提交独立表单
+            function confirm_delete_post_{post_id}(){{
+              try{{
+                if(!confirm('确定要删除该帖子的本轮内容吗？')) return;
+                if(!confirm('二次确认：删除后仅清空本轮帖子与媒体，保留历史评价与ID。继续？')) return;
+                var f = document.getElementById('delete_form_{post_id}');
+                if(f) f.submit();
+              }}catch(err){{}}
+            }}
             '''
+        )
+
+        # 独立删除表单（避免嵌套form），通过脚本触发提交
+        delete_form = Form(
+            Input(type="hidden", name="confirm", value="1"),
+            id=f"delete_form_{post_id}", method="post", action=f"/posts/{post_id}/delete",
+            style="display:none;"
         )
 
         content = Div(
@@ -907,6 +1025,7 @@ async def post_detail(request: Request, post_id: int):
             
             Div(edit_form, cls="card bg-base-100 shadow-xl p-6"),
             edit_copy_script,
+            delete_form,
             
             # 动态联动脚本：城市变更后刷新地区列表
             Script(
@@ -1205,6 +1324,12 @@ async def post_update(request: Request, post_id: int):
                 await MerchantMgmtService.refresh_telegram_user_info(post_id)
             except Exception:
                 pass
+            # 同步频道内的帖子（若已发布且有post_url）
+            try:
+                from services.review_publish_service import refresh_merchant_post_reviews
+                await refresh_merchant_post_reviews(post_id)
+            except Exception:
+                pass
             return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
         else:
             raise ValueError('更新失败')
@@ -1248,6 +1373,11 @@ async def post_reject(request: Request, post_id: int):
         )
         
         if result.get('success'):
+            # 驳回后通知商家前往“我的资料”修改
+            try:
+                await PostMgmtService.notify_rejection(post_id)
+            except Exception as _e:
+                logger.warning(f"驳回通知发送失败: {_e}")
             return RedirectResponse(url="/posts", status_code=302)
         else:
             raise ValueError(result.get('error', '驳回失败'))
@@ -1324,12 +1454,13 @@ async def post_delete(request: Request, post_id: int):
     try:
         result = await PostMgmtService.delete_post(post_id)
         if result.get('success'):
-            return RedirectResponse(url="/posts", status_code=302)
+            return RedirectResponse(url=f"/posts?deleted=1&message=" + url_quote("帖子已删除（保留历史与ID）"), status_code=302)
         else:
             raise ValueError(result.get('error', '删除失败'))
     except Exception as e:
         logger.error(f"删除帖子失败: {e}")
-        return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
+        # 返回列表并显示错误
+        return RedirectResponse(url=f"/posts?error=" + url_quote(str(e)), status_code=302)
 
 
 ## 移除：待提交的快捷“设为待审核”入口，改由Bot侧“提交审核”按钮触发

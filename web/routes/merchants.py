@@ -305,40 +305,10 @@ async def merchant_detail(request: Request):
             cls="card bg-base-100 shadow p-4"
         )
 
-        # 管理动作（前端层：状态更新/刷新信息）
+        # 管理动作（前端层：仅保留信息刷新；审核/发布动作放在“帖子管理”）
         current_status = str(merchant.get('status') or '')
         # 根据当前状态给出最小动作
         actions = []
-        # 审核通过
-        if current_status in {MERCHANT_STATUS.PENDING_SUBMISSION.value, MERCHANT_STATUS.PENDING_APPROVAL.value}:
-            actions.append(
-                Form(
-                    Input(type="hidden", name="csrf_token", value=csrf),
-                    Input(type="hidden", name="new_status", value=MERCHANT_STATUS.APPROVED.value),
-                    Button("审核通过", type="submit", cls="btn btn-success btn-sm"),
-                    method="post", action=f"/merchants/{merchant_id}/status"
-                )
-            )
-        # 立即发布
-        if current_status == MERCHANT_STATUS.APPROVED.value:
-            actions.append(
-                Form(
-                    Input(type="hidden", name="csrf_token", value=csrf),
-                    Input(type="hidden", name="new_status", value=MERCHANT_STATUS.PUBLISHED.value),
-                    Button("立即发布", type="submit", cls="btn btn-info btn-sm"),
-                    method="post", action=f"/merchants/{merchant_id}/status"
-                )
-            )
-        # 设为过期
-        if current_status == MERCHANT_STATUS.PUBLISHED.value:
-            actions.append(
-                Form(
-                    Input(type="hidden", name="csrf_token", value=csrf),
-                    Input(type="hidden", name="new_status", value=MERCHANT_STATUS.EXPIRED.value),
-                    Button("设为过期", type="submit", cls="btn btn-warning btn-sm"),
-                    method="post", action=f"/merchants/{merchant_id}/status"
-                )
-            )
 
         # 刷新Telegram资料
         actions.append(

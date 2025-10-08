@@ -16,8 +16,10 @@ from database.db_media import media_db
 from database.db_regions import region_manager
 from utils.enums import MERCHANT_STATUS
 from database.db_channels import posting_channels_db
-from config import BOT_TOKEN
+from config import BOT_TOKEN, DEEPLINK_BOT_USERNAME, ADMIN_IDS
 import aiohttp
+from database.db_channel_posts import record_posts, list_posts, delete_records_for_merchant
+from services.review_publish_service import _parse_channel_post_link
 
 # 导入缓存服务
 from .cache_service import CacheService
@@ -112,33 +114,32 @@ class PostMgmtService:
             dict: 帖子列表数据
         """
         try:
-            # 唯一口径：当提供 kw/price/region 筛选时，使用统一服务
-            merchants = []
-            total_posts = 0
-            if kw_id is not None:
-                merchants = await merchant_manager.list_active_by_keyword(int(kw_id), limit=per_page, offset=(page-1)*per_page)
+            # 帖子管理页始终使用统一分页接口，支持状态/地区/搜索/排序
+            # 规范化 district_id（防止传入“全部地区”等非数字）
+            try:
+                district_id_val = int(region_filter) if (region_filter is not None and str(region_filter).isdigit()) else None
+            except Exception:
+                district_id_val = None
+
+            # 规范化 status（非法值折叠为None）
+            valid_status = {s.value for s in MERCHANT_STATUS}
+            status_val = status_filter if (status_filter in valid_status) else None
+
+            merchants_data = await merchant_manager.get_merchants_list(
+                page=page,
+                per_page=per_page,
+                status=status_val,
+                district_id=district_id_val,
+                search=search_query,
+                sort_by=sort_by
+            )
+            merchants = merchants_data.get('posts', [])
+            total_posts = merchants_data.get('total', 0)
+
+            # 业务约束：帖子管理默认不显示“待提交”（包括被软删除后的商家）
+            if not status_filter:
+                merchants = [m for m in merchants if str(m.get('status')) != 'pending_submission']
                 total_posts = len(merchants)
-            elif price_p is not None:
-                merchants = await merchant_manager.list_active_by_price('p_price', int(price_p), limit=per_page, offset=(page-1)*per_page)
-                total_posts = len(merchants)
-            elif price_pp is not None:
-                merchants = await merchant_manager.list_active_by_price('pp_price', int(price_pp), limit=per_page, offset=(page-1)*per_page)
-                total_posts = len(merchants)
-            elif region_filter:
-                merchants = await merchant_manager.list_active_by_district(int(region_filter), limit=per_page, offset=(page-1)*per_page)
-                total_posts = len(merchants)
-            else:
-                # 回到帖子管理既有列表：分页、排序、状态筛选
-                merchants_data = await merchant_manager.get_merchants_list(
-                    page=page,
-                    per_page=per_page,
-                    status=status_filter,
-                    district_id=int(region_filter) if region_filter else None,
-                    search=search_query,
-                    sort_by=sort_by
-                )
-                merchants = merchants_data.get('posts', [])
-                total_posts = merchants_data.get('total', 0)
             
             # 获取帖子统计
             post_stats = await PostMgmtService._get_post_statistics()
@@ -363,11 +364,17 @@ class PostMgmtService:
                                         data = await resp.json()
                                         sent_ok = bool(data.get('ok'))
                                         first_msg_id = None
+                                        all_msg_ids = []
                                         if sent_ok:
                                             try:
                                                 arr = data.get('result') or []
                                                 if isinstance(arr, list) and arr:
                                                     first_msg_id = int(arr[0].get('message_id'))
+                                                    for _m in arr:
+                                                        try:
+                                                            all_msg_ids.append(int(_m.get('message_id')))
+                                                        except Exception:
+                                                            pass
                                             except Exception:
                                                 first_msg_id = None
                                         else:
@@ -440,6 +447,16 @@ class PostMgmtService:
                             link = _build_post_link(str(channel_chat_id), int(first_msg_id))
                             if link:
                                 await merchant_manager.set_post_url(merchant_id, link)
+                        # 保存所有消息记录，便于后续删除或编辑
+                        try:
+                            await record_posts(
+                                merchant_id,
+                                str(channel_chat_id),
+                                list(set(all_msg_ids)) if 'all_msg_ids' in locals() else ([] if 'first_msg_id' not in locals() else [int(first_msg_id)]),
+                                url_builder=_build_post_link
+                            )
+                        except Exception as _re:
+                            logger.warning(f"保存频道消息记录失败: {_re}")
                         from services.review_publish_service import refresh_merchant_post_reviews
                         await refresh_merchant_post_reviews(merchant_id)
                     except Exception as _e:
@@ -604,18 +621,81 @@ class PostMgmtService:
 
     @staticmethod
     async def delete_post(merchant_id: int) -> Dict[str, Any]:
-        """删除帖子（即删除对应商户记录）"""
+        """
+        删除“本轮帖子信息”（软删除），保留商户永久ID与历史评价/订单等沉淀数据。
+
+        动作：
+        - 清空 merchants 表中的发帖相关字段，状态重置为 pending_submission；
+        - 删除媒体 media 与关键词关联 merchant_keywords；
+        - 不删除 reviews/merchant_scores/orders 等与历史沉淀有关的数据；
+        - 保留 telegram_chat_id/name 等标识信息，便于下次机器人重新提交接力。
+        """
         try:
-            result = await merchant_manager.delete_merchant(merchant_id)
-            if result:
-                CacheService.clear_namespace(PostMgmtService.CACHE_NAMESPACE)
-                CacheService.clear_namespace("dashboard")
-                logger.info(f"帖子删除成功: merchant_id={merchant_id}")
-                return {'success': True, 'message': '帖子已删除'}
-            else:
-                return {'success': False, 'error': '帖子删除失败'}
+            # 0) 先删除频道中的历史消息（若记录存在）
+            try:
+                rows = await list_posts(merchant_id)
+                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
+                deleted_any = False
+                if rows:
+                    async with aiohttp.ClientSession() as session:
+                        for r in rows:
+                            try:
+                                payload = {'chat_id': r.get('chat_id'), 'message_id': int(r.get('message_id'))}
+                                async with session.post(api_url, json=payload, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                                    _d = await resp.json()
+                                    if not _d.get('ok'):
+                                        logger.warning(f"删除频道消息失败: {r} -> {_d}")
+                                    else:
+                                        deleted_any = True
+                            except Exception as _e:
+                                logger.warning(f"删除频道消息异常: {r} -> {_e}")
+                    # 删除本地记录
+                    await delete_records_for_merchant(merchant_id)
+                # 兜底：若无记录，尝试解析 merchants.post_url 删除首条
+                if not rows:
+                    try:
+                        merchant = await merchant_manager.get_merchant_by_id(merchant_id)
+                        url = (merchant.get('post_url') or '').strip() if merchant else ''
+                        parsed = _parse_channel_post_link(url) if url else None
+                        if parsed:
+                            chat_id_val, message_id_val = parsed
+                            async with aiohttp.ClientSession() as session:
+                                async with session.post(api_url, json={'chat_id': chat_id_val, 'message_id': int(message_id_val)}, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                                    _d = await resp.json()
+                                    if not _d.get('ok'):
+                                        logger.warning(f"删除频道消息失败(post_url兜底): {url} -> {_d}")
+                                    else:
+                                        deleted_any = True
+                    except Exception as _fe:
+                        logger.warning(f"post_url兜底删除异常: {url} -> {_fe}")
+                if deleted_any:
+                    logger.info(f"频道消息已删除（merchant_id={merchant_id}）")
+            except Exception as e:
+                logger.warning(f"清理频道消息记录时发生异常: {e}")
+
+            # 1) 仅重置“本轮帖子相关字段”，不影响商户基础信息
+            reset_fields = {
+                'status': 'pending_submission',
+                'publish_time': None,
+                'expiration_time': None,
+                'post_url': None,
+                # 保留渠道、文案、价格、地区、关键词、媒体与联系方式等基础信息
+            }
+            set_clause = ", ".join([f"{k} = ?" for k in reset_fields.keys()])
+            params = tuple(reset_fields.values()) + (merchant_id,)
+            upd_sql = f"UPDATE merchants SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+            result = await db_manager.execute_query(upd_sql, params)
+
+            if result is None:
+                return {'success': False, 'error': '帖子清理失败'}
+
+            # 2) 清缓存
+            CacheService.clear_namespace(PostMgmtService.CACHE_NAMESPACE)
+            CacheService.clear_namespace("dashboard")
+            logger.info(f"帖子软删除（本轮清理）成功: merchant_id={merchant_id}")
+            return {'success': True, 'message': '帖子已删除（保留历史与ID）'}
         except Exception as e:
-            logger.error(f"删除帖子失败: merchant_id={merchant_id}, error={e}")
+            logger.error(f"删除帖子失败(软删除): merchant_id={merchant_id}, error={e}")
             return {'success': False, 'error': str(e)}
     
     @staticmethod
@@ -739,6 +819,94 @@ class PostMgmtService:
         except Exception as e:
             logger.error(f"获取过期分析失败: {e}")
             return {}
+
+    # ====== 审核驳回通知（机器人消息） ======
+    @staticmethod
+    async def notify_rejection(merchant_id: int, admin_username: Optional[str] = None) -> bool:
+        """在审核“驳回修改”后，给商家发送引导消息 + “我的资料”按钮。
+
+        - 文案：
+          审核未通过，请按管理员意见修改后再提交。\n
+          不清楚的地方请先与管理员沟通：@{admin_username}\n
+          点击“我的资料”进行修改。
+
+        Returns: 是否发送成功
+        """
+        try:
+            merchant = await merchant_manager.get_merchant_by_id(merchant_id)
+            if not merchant:
+                return False
+            chat_id = merchant.get('telegram_chat_id')
+            if not chat_id:
+                # 兜底1：尝试从 user_info JSON 解析
+                try:
+                    import json as _json
+                    ui = merchant.get('user_info')
+                    if isinstance(ui, str) and ui:
+                        ui = _json.loads(ui)
+                    if isinstance(ui, dict):
+                        rid = ui.get('id') or (ui.get('raw_info') or {}).get('id')
+                        if rid:
+                            chat_id = rid
+                except Exception:
+                    pass
+                # 兜底2：尝试主动刷新并重读
+                if not chat_id:
+                    try:
+                        from .merchant_mgmt_service import MerchantMgmtService
+                        await MerchantMgmtService.refresh_telegram_user_info(merchant_id)
+                        merchant = await merchant_manager.get_merchant_by_id(merchant_id)
+                        chat_id = merchant.get('telegram_chat_id') if merchant else None
+                    except Exception:
+                        chat_id = None
+            if not chat_id:
+                logger.warning(f"notify_rejection: 无法获取 telegram_chat_id, merchant_id={merchant_id}")
+                return False
+
+            # 解析管理员用户名（优先入参；否则取第一个 ADMIN_IDS 调 API 获取 username；兜底 @admin）
+            if not admin_username:
+                admin_username = None
+                try:
+                    if ADMIN_IDS:
+                        aid = int(ADMIN_IDS[0])
+                        api_get_chat = f"https://api.telegram.org/bot{BOT_TOKEN}/getChat"
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(api_get_chat, params={'chat_id': aid}, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                                data = await resp.json()
+                                if data.get('ok') and data.get('result', {}).get('username'):
+                                    admin_username = f"@{data['result']['username']}"
+                except Exception:
+                    admin_username = None
+                if not admin_username:
+                    admin_username = '@admin'
+
+            text = (
+                "审核未通过，请按管理员意见修改后再提交。\n"
+                f"不清楚的地方请先与管理员沟通：{admin_username}\n"
+                "点击“我的资料”进行修改。"
+            )
+
+            payload = {
+                'chat_id': chat_id,
+                'text': text,
+                'disable_web_page_preview': True,
+            }
+            # 按钮使用 callback_data，与 /start 后的“我的资料”一致
+            payload['reply_markup'] = {
+                'inline_keyboard': [[{'text': '我的资料', 'callback_data': 'profile'}]]
+            }
+
+            api_send = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            async with aiohttp.ClientSession() as session:
+                async with session.post(api_send, json=payload, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    data = await resp.json()
+                    ok = bool(data.get('ok'))
+                    if not ok:
+                        logger.warning(f"notify_rejection 发送失败: merchant_id={merchant_id}, resp={data}")
+                    return ok
+        except Exception as e:
+            logger.error(f"notify_rejection 异常: merchant_id={merchant_id}, error={e}")
+            return False
     
     @staticmethod
     async def _get_region_info(service_area: str) -> Dict[str, Any]:

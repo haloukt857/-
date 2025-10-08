@@ -259,6 +259,27 @@ input, select, textarea, button, code, pre {
   font-family: inherit !important; /* 保持TailwindCSS/DaisyUI默认字体栈 */
 }
 
+/* Windows 浏览器下拉项可视性修复
+   说明：Windows 上原生 <select> 下拉面板背景常为纯白，
+   如果继承了全局 white 字色，会出现“白字白底”不可读。
+   这里强制为下拉项设置黑色文字与白色底，确保可见性。 */
+/* 优先尝试统一为“黑底白字”的下拉项样式 */
+select option, .select option {
+  color: #ffffff !important;
+  background-color: #121212 !important; /* 深色背景 */
+}
+select:focus option, .select:focus option {
+  color: #ffffff !important;
+  background-color: #121212 !important;
+}
+/* 兼容性提示：部分 Windows/Chromium 版本可能忽略 option 的背景色，
+   此时会使用系统白底；为了仍保持可读性，可在需要时把下一段“白底黑字”兜底打开。
+   
+   select option{color:#000;background:#fff}  */
+
+/* 提示操作系统采用深色控件渲染（部分浏览器支持） */
+select, .select { color-scheme: dark !important; }
+
 /* 统一布局标准类 */
 
 /* 页面头部 */
