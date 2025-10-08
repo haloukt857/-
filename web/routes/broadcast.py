@@ -39,9 +39,31 @@ async def broadcast_page(request: Request):
             help_text="仅支持纯文本。实际发送遵循 Telegram 速率限制。"
         ),
         okx_form_group(
+            "预先检测活跃状态",
+            Div(
+                Label(
+                    Input(type="checkbox", name="precheck_active", checked=True, cls="checkbox checkbox-sm mr-2"),
+                    Span("先检测用户是否仍可接收消息（推荐）"),
+                    cls="flex items-center"
+                )
+            ),
+            help_text="通过 getChatMember/getChat 检测被拉黑/不可达用户并跳过，不发送任何消息。"
+        ),
+        okx_form_group(
             "测试用户ID",
             okx_input("test_user_id", type="number", placeholder="仅向该用户发送（可选）"),
             help_text="先用你的管理员ID测试，确认格式正确后再群发。"
+        ),
+        okx_form_group(
+            "仅检测不发送",
+            Div(
+                Label(
+                    Input(type="checkbox", name="dry_run", cls="checkbox checkbox-sm mr-2"),
+                    Span("只进行活跃检测，不发送消息"),
+                    cls="flex items-center"
+                )
+            ),
+            help_text="用于全量健康扫描，结果会显示可达/不可达统计。"
         ),
         Div(
             okx_button("发送广播", type="submit", cls="btn btn-primary"),
@@ -94,11 +116,16 @@ async def broadcast_send(request: Request):
             content = Div(P("测试用户ID 必须为整数", cls="text-error"))
             return create_layout("提交失败", content)
 
+    precheck_active = bool(form.get("precheck_active") is not None)
+    dry_run = bool(form.get("dry_run") is not None)
+
     job_id = await broadcast_service.start_broadcast(
         text=text,
         test_user_id=test_uid_val,
         disable_notification=False,
         protect_content=False,
+        precheck_active=precheck_active,
+        dry_run=dry_run,
     )
 
     progress = Div(
@@ -107,6 +134,7 @@ async def broadcast_send(request: Request):
         Div(
             Progress(value="0", max="100", id="prog", cls="progress progress-primary w-full"),
             P("准备中...", id="stats", cls="text-sm mt-2"),
+            P("", id="prestats", cls="text-xs mt-1 text-gray-500"),
             cls="max-w-xl"
         ),
         Script(f"""
@@ -114,6 +142,7 @@ async def broadcast_send(request: Request):
               const jobId = '{job_id}';
               const prog = document.getElementById('prog');
               const stats = document.getElementById('stats');
+              const prestats = document.getElementById('prestats');
               let timer = null;
               async function poll(){{
                 try {{
@@ -127,11 +156,17 @@ async def broadcast_send(request: Request):
                     const rate = data.rate || 0;
                     const eta = data.eta_seconds;
                     const status = data.status;
+                    const preTotal = data.prechecked_total;
+                    const eligible = data.eligible_total;
+                    const skipped = data.skipped_inactive;
                     const pct = total > 0 ? Math.floor(sent*100/total) : 0;
                     prog.value = String(pct);
                     stats.textContent = '状态: ' + status + ' | 进度: ' + sent + ' / ' + total + ' (' + pct + '%)'
                       + ' | 成功: ' + success + ' | 失败: ' + failed + ' | 速率: ' + rate + '/s'
                       + ' | ETA: ' + (eta == null ? '-' : (eta + 's'));
+                    if (preTotal != null) {{
+                      prestats.textContent = '预检: 可达 ' + (eligible || 0) + ' / ' + preTotal + ' ，跳过 ' + (skipped || 0);
+                    }}
                     if (status === 'done' || status === 'failed') {{
                       clearInterval(timer);
                       timer = null;

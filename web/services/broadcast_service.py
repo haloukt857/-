@@ -38,6 +38,11 @@ class BroadcastJob:
         self.finished_at: Optional[float] = None
         self.last_error: Optional[str] = None
         self.opts = opts or {}
+        # 预检统计
+        self.stage = "pending"  # pending | precheck | sending | done | failed
+        self.prechecked_total: Optional[int] = None
+        self.eligible_total: Optional[int] = None
+        self.skipped_inactive: Optional[int] = None
 
     def as_dict(self) -> Dict[str, Any]:
         now = time.time()
@@ -50,6 +55,7 @@ class BroadcastJob:
         return {
             "job_id": self.id,
             "status": self.status,
+            "stage": self.stage,
             "total": self.total,
             "sent": self.sent,
             "success": self.success,
@@ -59,6 +65,9 @@ class BroadcastJob:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "last_error": self.last_error,
+            "prechecked_total": self.prechecked_total,
+            "eligible_total": self.eligible_total,
+            "skipped_inactive": self.skipped_inactive,
         }
 
 
@@ -82,6 +91,8 @@ async def start_broadcast(
     test_user_id: Optional[int] = None,
     disable_notification: bool = False,
     protect_content: bool = False,
+    precheck_active: bool = True,
+    dry_run: bool = False,
 ) -> str:
     """启动广播任务，返回 job_id。"""
     targets = await _fetch_targets(test_user_id)
@@ -89,6 +100,8 @@ async def start_broadcast(
     job = BroadcastJob(job_id, total=len(targets), text=text, opts={
         "disable_notification": bool(disable_notification),
         "protect_content": bool(protect_content),
+        "precheck_active": bool(precheck_active),
+        "dry_run": bool(dry_run),
     })
     JOBS[job_id] = job
     asyncio.create_task(_run_job(job_id, targets, text))
@@ -114,6 +127,9 @@ async def _run_job(job_id: str, targets: List[int], text: str) -> None:
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     job.status = "running"
+    # 若仅检测，则强制进行预检
+    precheck_enabled = bool(job.opts.get("precheck_active") or job.opts.get("dry_run"))
+    job.stage = "precheck" if precheck_enabled else "sending"
     job.started_at = time.time()
 
     # 简单的每秒窗口 30 条节流（私聊标准）
@@ -124,6 +140,103 @@ async def _run_job(job_id: str, targets: List[int], text: str) -> None:
     headers = {"Content-Type": "application/json"}
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
+        # 可选：预检用户活跃性（dry_run 时强制开启）
+        if precheck_enabled and targets:
+            eligibles: List[int] = []
+            total_pre = 0
+            # 复用相同的窗口节流
+            pre_window_start = time.monotonic()
+            pre_sent_in_window = 0
+            get_member_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChatMember"
+            get_chat_url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChat"
+
+            for uid in targets:
+                # 节流控制（每秒最多30次请求）
+                nowp = time.monotonic()
+                if nowp - pre_window_start >= 1.0:
+                    pre_window_start = nowp
+                    pre_sent_in_window = 0
+                if pre_sent_in_window >= 30:
+                    await asyncio.sleep(max(0.0, 1.0 - (nowp - pre_window_start)))
+                    pre_window_start = time.monotonic()
+                    pre_sent_in_window = 0
+
+                active = False
+                tries = 0
+                last_err = None
+                while tries < 2 and not active:
+                    tries += 1
+                    # 优先 getChatMember（私聊可用），失败则回退 getChat
+                    try:
+                        async with session.get(get_member_url, params={"chat_id": int(uid), "user_id": int(uid)}) as resp:
+                            data = await resp.json()
+                            if data.get("ok"):
+                                st = str((data.get("result") or {}).get("status", "")).lower()
+                                # member/creator/administrator 视为可达
+                                if st in {"member", "creator", "administrator"}:
+                                    active = True
+                                    break
+                                # left/kicked 视为不可达
+                                else:
+                                    active = False
+                                    break
+                            else:
+                                code = data.get("error_code")
+                                desc = str(data.get("description"))
+                                if code == 429:
+                                    ra = int((data.get("parameters") or {}).get("retry_after", 1))
+                                    await asyncio.sleep(max(1, ra))
+                                    continue
+                                # 回退 getChat
+                    except Exception as e:
+                        last_err = str(e)
+
+                    # 回退：getChat
+                    try:
+                        async with session.get(get_chat_url, params={"chat_id": int(uid)}) as resp2:
+                            data2 = await resp2.json()
+                            if data2.get("ok"):
+                                active = True
+                                break
+                            else:
+                                code2 = data2.get("error_code")
+                                if code2 == 429:
+                                    ra2 = int((data2.get("parameters") or {}).get("retry_after", 1))
+                                    await asyncio.sleep(max(1, ra2))
+                                    continue
+                                active = False
+                                break
+                    except Exception as e2:
+                        last_err = str(e2)
+                        active = False
+                        break
+
+                total_pre += 1
+                pre_sent_in_window += 1
+                if active:
+                    eligibles.append(int(uid))
+
+            job.prechecked_total = total_pre
+            job.eligible_total = len(eligibles)
+            job.skipped_inactive = max(0, (total_pre - len(eligibles)))
+            targets = eligibles
+            job.total = len(eligibles)
+            # 仅检测模式：到此结束
+            if job.opts.get("dry_run"):
+                job.status = "done"
+                job.stage = "done"
+                job.finished_at = time.time()
+                return
+            # 进入发送阶段
+            job.stage = "sending"
+
+        # 若无可发送目标，直接完成
+        if not targets:
+            job.total = 0
+            job.status = "done"
+            job.finished_at = time.time()
+            return
+
         for chat_id in targets:
             # 速率窗口控制
             now = time.monotonic()
@@ -184,5 +297,5 @@ async def _run_job(job_id: str, targets: List[int], text: str) -> None:
                 job.last_error = last_err
 
     job.status = "done"
+    job.stage = "done"
     job.finished_at = time.time()
-
