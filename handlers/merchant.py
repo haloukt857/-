@@ -782,8 +782,8 @@ async def show_profile_panel_like_user(message: Message, user_id: int, state: FS
         from database.db_merchants import MerchantManager as _MM
         from database.db_regions import region_manager as _region
         from config import DEEPLINK_BOT_USERNAME as _BOTU
-from utils.caption_renderer import render_channel_caption_md as _render_md
-from services.review_publish_service import refresh_merchant_post_reviews as _refresh_post
+        from utils.caption_renderer import render_channel_caption_md as _render_md
+        from services.review_publish_service import refresh_merchant_post_reviews as _refresh_post
 
         merchant = await _MM.get_merchant_by_chat_id(user_id)
         if not merchant:

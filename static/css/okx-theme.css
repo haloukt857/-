@@ -136,6 +136,17 @@ html {
   z-index: 1001 !important;
 }
 
+/* 顶部导航永远在最上层 */
+.navbar {
+  background-color: var(--g-850) !important;
+  border-bottom: 1px solid #2a2a2a !important;
+  position: relative !important;
+  z-index: 3000 !important;
+}
+
+/* 导航下拉也要在最上层 */
+.navbar .dropdown .dropdown-content { z-index: 3500 !important; }
+
 /* 修复：某些下拉/模态隐藏层覆盖按钮，导致按钮中心偶发不可点 */
 .form-control, .select, .input, .textarea, .dropdown { position: relative !important; z-index: 0 !important; }
 .select::before, .select::after { pointer-events: none !important; }
