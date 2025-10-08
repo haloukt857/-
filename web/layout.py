@@ -124,6 +124,7 @@ def create_layout(title: str, content, show_nav: bool = True, include_charts: bo
     config_menu_items = [
         ("时间配置", "/schedule/time-slots", "/schedule/time-slots"),
         ("频道配置", "/channels/config", "/channels/config"),
+        ("关键词管理", "/config/keywords", "/config/keywords"),
         ("模板管理", "/templates", "/templates"),
         ("订阅验证", "/subscription", "/subscription"),
         ("自动回复", "/auto-reply", "/auto-reply"),
