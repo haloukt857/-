@@ -457,8 +457,12 @@ class PostMgmtService:
                             )
                         except Exception as _re:
                             logger.warning(f"保存频道消息记录失败: {_re}")
-                        from services.review_publish_service import refresh_merchant_post_reviews
-                        await refresh_merchant_post_reviews(merchant_id)
+                        # 异步刷新频道caption，避免阻塞UI
+                        try:
+                            from services.telegram_tasks import enqueue_edit_caption
+                            enqueue_edit_caption(merchant_id)
+                        except Exception:
+                            pass
                     except Exception as _e:
                         logger.warning(f"保存帖子链接或刷新评价区失败: {_e}")
                 # 清除相关缓存
@@ -632,46 +636,12 @@ class PostMgmtService:
         """
         try:
             # 0) 先删除频道中的历史消息（若记录存在）
+            # 将频道删除任务异步化
             try:
-                rows = await list_posts(merchant_id)
-                api_url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage"
-                deleted_any = False
-                if rows:
-                    async with aiohttp.ClientSession() as session:
-                        for r in rows:
-                            try:
-                                payload = {'chat_id': r.get('chat_id'), 'message_id': int(r.get('message_id'))}
-                                async with session.post(api_url, json=payload, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                                    _d = await resp.json()
-                                    if not _d.get('ok'):
-                                        logger.warning(f"删除频道消息失败: {r} -> {_d}")
-                                    else:
-                                        deleted_any = True
-                            except Exception as _e:
-                                logger.warning(f"删除频道消息异常: {r} -> {_e}")
-                    # 删除本地记录
-                    await delete_records_for_merchant(merchant_id)
-                # 兜底：若无记录，尝试解析 merchants.post_url 删除首条
-                if not rows:
-                    try:
-                        merchant = await merchant_manager.get_merchant_by_id(merchant_id)
-                        url = (merchant.get('post_url') or '').strip() if merchant else ''
-                        parsed = _parse_channel_post_link(url) if url else None
-                        if parsed:
-                            chat_id_val, message_id_val = parsed
-                            async with aiohttp.ClientSession() as session:
-                                async with session.post(api_url, json={'chat_id': chat_id_val, 'message_id': int(message_id_val)}, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                                    _d = await resp.json()
-                                    if not _d.get('ok'):
-                                        logger.warning(f"删除频道消息失败(post_url兜底): {url} -> {_d}")
-                                    else:
-                                        deleted_any = True
-                    except Exception as _fe:
-                        logger.warning(f"post_url兜底删除异常: {url} -> {_fe}")
-                if deleted_any:
-                    logger.info(f"频道消息已删除（merchant_id={merchant_id}）")
+                from services.telegram_tasks import enqueue_delete_merchant_posts
+                enqueue_delete_merchant_posts(merchant_id)
             except Exception as e:
-                logger.warning(f"清理频道消息记录时发生异常: {e}")
+                logger.warning(f"提交频道删除任务失败: {e}")
 
             # 1) 仅重置“本轮帖子相关字段”，不影响商户基础信息
             reset_fields = {
@@ -886,24 +856,15 @@ class PostMgmtService:
                 "点击“我的资料”进行修改。"
             )
 
-            payload = {
-                'chat_id': chat_id,
-                'text': text,
-                'disable_web_page_preview': True,
-            }
-            # 按钮使用 callback_data，与 /start 后的“我的资料”一致
-            payload['reply_markup'] = {
-                'inline_keyboard': [[{'text': '我的资料', 'callback_data': 'profile'}]]
-            }
-
-            api_send = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            async with aiohttp.ClientSession() as session:
-                async with session.post(api_send, json=payload, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                    data = await resp.json()
-                    ok = bool(data.get('ok'))
-                    if not ok:
-                        logger.warning(f"notify_rejection 发送失败: merchant_id={merchant_id}, resp={data}")
-                    return ok
+            # 异步发送，附带“我的资料”回调按钮
+            reply_markup = {'inline_keyboard': [[{'text': '我的资料', 'callback_data': 'profile'}]]}
+            try:
+                from services.telegram_tasks import enqueue_send_message
+                enqueue_send_message(chat_id, text, reply_markup)
+                return True
+            except Exception as _e:
+                logger.warning(f"提交驳回通知任务失败: {_e}")
+                return False
         except Exception as e:
             logger.error(f"notify_rejection 异常: merchant_id={merchant_id}, error={e}")
             return False

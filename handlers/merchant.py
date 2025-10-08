@@ -1584,7 +1584,8 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                 try:
                     m2 = await MerchantManager.get_merchant_by_id(merchant['id'])
                     if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
-                        await _refresh_post(merchant['id'])
+                        from services.telegram_tasks import enqueue_edit_caption
+                        enqueue_edit_caption(merchant['id'])
                     # 管理员通知（关键词更新）
                     before_stub = { 'id': merchant['id'], 'name': m2.get('name') if m2 else '-', 'keywords': None }
                     await _notify_admin_change(callback.bot, before_stub, m2, ['keywords'])
@@ -2136,7 +2137,8 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
                     try:
                         after = await MerchantManager.get_merchant_by_id(merchant['id'])
                         if after and str(after.get('status')) == 'published' and after.get('post_url'):
-                            await _refresh_post(merchant['id'])
+                            from services.telegram_tasks import enqueue_edit_caption
+                            enqueue_edit_caption(merchant['id'])
                         await _notify_admin_change(message.bot, before, after, ['name'])
                     except Exception:
                         pass
@@ -2156,7 +2158,8 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
                     try:
                         after = await MerchantManager.get_merchant_by_id(merchant['id'])
                         if after and str(after.get('status')) == 'published' and after.get('post_url'):
-                            await _refresh_post(merchant['id'])
+                            from services.telegram_tasks import enqueue_edit_caption
+                            enqueue_edit_caption(merchant['id'])
                         await _notify_admin_change(message.bot, before, after, ['contact_info'])
                     except Exception:
                         pass
@@ -2243,7 +2246,8 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
                         try:
                             after = await MerchantManager.get_merchant_by_id(merchant['id'])
                             if after and str(after.get('status')) == 'published' and after.get('post_url'):
-                                await _refresh_post(merchant['id'])
+                                from services.telegram_tasks import enqueue_edit_caption
+                                enqueue_edit_caption(merchant['id'])
                             await _notify_admin_change(message.bot, before, after, ['custom_description'])
                         except Exception:
                             pass
@@ -2283,7 +2287,8 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
                         try:
                             after = await MerchantManager.get_merchant_by_id(merchant['id'])
                             if after and str(after.get('status')) == 'published' and after.get('post_url'):
-                                await _refresh_post(merchant['id'])
+                                from services.telegram_tasks import enqueue_edit_caption
+                                enqueue_edit_caption(merchant['id'])
                             await _notify_admin_change(message.bot, before, after, ['adv_sentence'])
                         except Exception:
                             pass

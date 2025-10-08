@@ -127,6 +127,7 @@ def create_layout(title: str, content, show_nav: bool = True, include_charts: bo
         ("模板管理", "/templates", "/templates"),
         ("订阅验证", "/subscription", "/subscription"),
         ("自动回复", "/auto-reply", "/auto-reply"),
+        ("手动广播", "/broadcast", "/broadcast"),
         ("地区管理", "/regions", "/regions"),
     ]
     

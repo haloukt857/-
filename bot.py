@@ -302,6 +302,14 @@ class TelegramMerchantBot:
             # 启动健康监控
             asyncio.create_task(self.health_monitor.start_monitoring())
             logger.info("健康监控已启动")
+
+            # 启动后台任务队列workers（用于异步Telegram I/O）
+            try:
+                from services.task_queue import start_task_workers
+                await start_task_workers(worker_count=3)
+                logger.info("后台任务队列已启动（bot）")
+            except Exception as e:
+                logger.warning(f"启动后台任务队列失败（bot）: {e}")
             
             # 通知管理员机器人启动
             startup_message = f"🤖 机器人启动成功\n\n" \

@@ -25,7 +25,7 @@ from config import WEB_CONFIG, bot_config
 from .routes import (
     auth, dashboard, merchants, users, orders,
     reviews, regions, incentives, subscription,
-    binding_codes, posts, templates, debug, media, user_analytics, scheduling, channels
+    binding_codes, posts, templates, debug, media, user_analytics, scheduling, channels, broadcast
 )
 if os.getenv('RUN_MODE', 'dev') == 'dev':
     from .routes import dev_tools
@@ -49,6 +49,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Session中间件
 app.add_middleware(SessionMiddleware, secret_key=WEB_CONFIG.get("secret_key", "your-secret-key-here"), max_age=86400)
+
+# 启动后台任务队列（异步Telegram I/O）
+@app.on_event("startup")
+async def _start_bg_queue():
+    try:
+        from services.task_queue import start_task_workers
+        await start_task_workers(worker_count=2)
+        logger.info("后台任务队列已启动（web）")
+    except Exception as e:
+        logger.warning(f"后台任务队列启动失败（web）: {e}")
 
 # === 异常处理 ===
 
@@ -201,6 +211,11 @@ app.route("/schedule/time-slots", methods=['GET', 'POST'])(scheduling.time_slots
 
 # 频道配置
 app.route("/channels/config", methods=['GET', 'POST'])(channels.channel_config_page)
+
+# 手动广播
+app.get("/broadcast")(broadcast.broadcast_page)
+app.post("/broadcast/send")(broadcast.broadcast_send)
+app.get("/broadcast/status")(broadcast.broadcast_status_api)
 
 # 帖子管理路由
 app.get("/posts")(posts.posts_list)

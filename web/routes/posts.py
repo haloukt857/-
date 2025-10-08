@@ -169,25 +169,25 @@ def generate_posts_quick_action_buttons(post_id: str, current_status: str, expir
     if current_status == 'pending_approval':
         buttons.extend([
             Form(
-                Button("立即批准", type="submit", cls="btn btn-success btn-xs"),
-                method="post", action=f"/posts/{post_id}/approve"
+                Button("立即批准", type="submit", cls="btn btn-success btn-xs whitespace-nowrap normal-case shrink-0"),
+                method="post", action=f"/posts/{post_id}/approve", cls="inline-flex shrink-0"
             ),
             Form(
-                Button("驳回修改", type="submit", cls="btn btn-warning btn-xs"),
-                method="post", action=f"/posts/{post_id}/reject"
+                Button("驳回修改", type="submit", cls="btn btn-warning btn-xs whitespace-nowrap normal-case shrink-0"),
+                method="post", action=f"/posts/{post_id}/reject", cls="inline-flex shrink-0"
             )
         ])
 
     elif current_status == 'approved':
         buttons.extend([
             Form(
-                Button("立即发布", type="submit", cls="btn btn-info btn-xs"),
-                method="post", action=f"/posts/{post_id}/publish"
+                Button("立即发布", type="submit", cls="btn btn-info btn-xs whitespace-nowrap normal-case shrink-0"),
+                method="post", action=f"/posts/{post_id}/publish", cls="inline-flex shrink-0"
             ),
             Form(
-                Button("延长1天", type="submit", cls="btn btn-ghost btn-xs"),
+                Button("延长1天", type="submit", cls="btn btn-ghost btn-xs whitespace-nowrap normal-case shrink-0"),
                 Input(type="hidden", name="days", value="1"),
-                method="post", action=f"/posts/{post_id}/extend"
+                method="post", action=f"/posts/{post_id}/extend", cls="inline-flex shrink-0"
             )
         ])
 
@@ -200,36 +200,36 @@ def generate_posts_quick_action_buttons(post_id: str, current_status: str, expir
         if is_expired_by_time:
             # 替换“设为过期”为不可点的“已过期”
             buttons.extend([
-                Button("已过期", cls="btn btn-disabled btn-xs", disabled=True),
+                Button("已过期", cls="btn btn-disabled btn-xs whitespace-nowrap normal-case shrink-0", disabled=True),
                 Form(
-                    Button("延长1天", type="submit", cls="btn btn-ghost btn-xs"),
+                    Button("延长1天", type="submit", cls="btn btn-ghost btn-xs whitespace-nowrap normal-case shrink-0"),
                     Input(type="hidden", name="days", value="1"),
-                    method="post", action=f"/posts/{post_id}/extend"
+                    method="post", action=f"/posts/{post_id}/extend", cls="inline-flex shrink-0"
                 )
             ])
         else:
             buttons.extend([
                 Form(
-                    Button("设为过期", type="submit", cls="btn btn-warning btn-xs"),
-                    method="post", action=f"/posts/{post_id}/expire"
+                    Button("设为过期", type="submit", cls="btn btn-warning btn-xs whitespace-nowrap normal-case shrink-0"),
+                    method="post", action=f"/posts/{post_id}/expire", cls="inline-flex shrink-0"
                 ),
                 Form(
-                    Button("延长1天", type="submit", cls="btn btn-ghost btn-xs"),
+                    Button("延长1天", type="submit", cls="btn btn-ghost btn-xs whitespace-nowrap normal-case shrink-0"),
                     Input(type="hidden", name="days", value="1"),
-                    method="post", action=f"/posts/{post_id}/extend"
+                    method="post", action=f"/posts/{post_id}/extend", cls="inline-flex shrink-0"
                 )
             ])
     elif current_status == 'expired':
         # 过期：允许重新发布或删除本轮帖子
         buttons.extend([
             Form(
-                Button("重新发布", type="submit", cls="btn btn-success btn-xs"),
-                method="post", action=f"/posts/{post_id}/publish"
+                Button("重新发布", type="submit", cls="btn btn-success btn-xs whitespace-nowrap normal-case shrink-0"),
+                method="post", action=f"/posts/{post_id}/publish", cls="inline-flex shrink-0"
             ),
             Form(
-                Button("删除帖子", type="submit", cls="btn btn-error btn-xs",
+                Button("删除帖子", type="submit", cls="btn btn-error btn-xs whitespace-nowrap normal-case shrink-0",
                        onclick="return confirm('确认删除本轮帖子？商户资料与评价不会被删除。')"),
-                method="post", action=f"/posts/{post_id}/delete"
+                method="post", action=f"/posts/{post_id}/delete", cls="inline-flex shrink-0"
             )
         ])
 
@@ -359,7 +359,7 @@ async def posts_list(request: Request):
                     Th("发布时间", cls="whitespace-nowrap px-2 py-1 text-xs"),
                     Th("到期时间", cls="whitespace-nowrap px-2 py-1 text-xs"),
                     Th("创建时间", cls="whitespace-nowrap px-2 py-1 text-xs"),
-                    Th("操作", cls="whitespace-nowrap px-2 py-1 text-xs text-right")
+                    Th("操作", cls="whitespace-nowrap px-2 py-1 text-xs text-right min-w-[320px]")
                 )
             ),
             Tbody(
@@ -374,8 +374,9 @@ async def posts_list(request: Request):
                         Td(
                             (lambda _st: Span(
                                 POST_STATUS_DISPLAY_MAP.get(_st, _st),
-                                cls=f"badge badge-sm {get_posts_status_color(_st)}"
+                                cls=f"badge badge-sm whitespace-nowrap {get_posts_status_color(_st)}"
                             ))(get_effective_status(post['status'], post.get('expiration_time'))),
+                            cls="px-2 py-1"
                         ),
                         Td(f"{post.get('city_name', '')} - {post.get('district_name', '')}", cls="whitespace-nowrap text-xs px-2 py-1"),
                         Td((post.get('channel_chat_id') or '-') if isinstance(post.get('channel_chat_id'), str) else '-', cls="whitespace-nowrap font-mono text-xs px-2 py-1"),
@@ -392,13 +393,14 @@ async def posts_list(request: Request):
                         Td(post.get('created_at', ''), cls="whitespace-nowrap text-xs px-2 py-1"),
                         Td(
                             Div(
-                                A("详情", href=f"/posts/{post['id']}", cls="btn btn-sm btn-info mr-1"),
-                                A("编辑", href=f"/posts/{post['id']}?mode=edit", cls="btn btn-sm btn-ghost mr-1"),
+                                A("详情", href=f"/posts/{post['id']}", cls="btn btn-sm btn-info mr-1 whitespace-nowrap normal-case shrink-0"),
+                                A("编辑", href=f"/posts/{post['id']}?mode=edit", cls="btn btn-sm btn-ghost mr-1 whitespace-nowrap normal-case shrink-0"),
                                 *generate_posts_quick_action_buttons(
                                     str(post['id']), post['status'], post.get('expiration_time')
                                 ),
-                                cls="flex gap-1 flex-nowrap justify-end"
-                            )
+                                cls="flex flex-wrap gap-2 justify-end"
+                            ),
+                            cls="px-2 py-1 min-w-[320px] whitespace-nowrap"
                         )
                     )
                     for post in posts
@@ -1324,10 +1326,10 @@ async def post_update(request: Request, post_id: int):
                 await MerchantMgmtService.refresh_telegram_user_info(post_id)
             except Exception:
                 pass
-            # 同步频道内的帖子（若已发布且有post_url）
+            # 异步同步频道内的帖子（若已发布且有post_url）
             try:
-                from services.review_publish_service import refresh_merchant_post_reviews
-                await refresh_merchant_post_reviews(post_id)
+                from services.telegram_tasks import enqueue_edit_caption
+                enqueue_edit_caption(post_id)
             except Exception:
                 pass
             return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
