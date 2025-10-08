@@ -26,7 +26,7 @@ class DatabaseInitializer:
     
     def __init__(self):
         """初始化数据库初始化器"""
-        self.current_schema_version = "2025.10.08.1"
+        self.current_schema_version = "2025.10.08.2"
         self.migrations_dir = PathManager.get_database_migration_path()
         self.migration_history = []
     
@@ -101,7 +101,7 @@ class DatabaseInitializer:
             'activity_logs', 'fsm_states', 'system_config',
             'auto_reply_triggers', 'auto_reply_messages', 'auto_reply_daily_stats',
             'cities', 'districts', 'keywords', 'merchant_keywords',
-            'posting_time_slots', 'posting_channels', 'merchant_posts'
+            'posting_time_slots', 'posting_channels', 'merchant_posts', 'region_manual_whitelist'
         ]
         
         try:

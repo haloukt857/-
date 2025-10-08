@@ -92,6 +92,9 @@ app.get("/merchants")(merchants.merchants_list)
 # 商户详情 + 管理动作（仅前端/服务层，不改后端逻辑）
 app.get("/merchants/{merchant_id}/detail")(merchants.merchant_detail)
 app.post("/merchants/{merchant_id}/status")(merchants.merchant_update_status)
+app.post("/merchants/manual-region-toggle")(merchants.manual_region_toggle)
+app.post("/merchants/{merchant_id}/region-allow")(merchants.merchant_region_allow)
+app.post("/merchants/{merchant_id}/region-remove")(merchants.merchant_region_remove)
 app.post("/merchants/{merchant_id}/refresh")(merchants.merchant_refresh_info)
 
 # 用户管理路由

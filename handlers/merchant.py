@@ -88,6 +88,75 @@ async def _clear_prompt_messages(state: FSMContext, bot: Bot, chat_id: int) -> N
     except Exception:
         pass
 
+# ===== 管理员通知：商家资料修改 ===== #
+async def _notify_admin_change(bot: Bot, before: dict, after: dict, changed_fields: list[str]) -> None:
+    """向管理员推送“商家信息更新”通知（轻量，不抛异常）。"""
+    try:
+        if not ADMIN_IDS:
+            return
+        mid = (after or {}).get('id') or (before or {}).get('id')
+        name = (after or {}).get('name') or (before or {}).get('name') or '-'
+
+        # 工具：城市/区县/关键词名
+        async def _city_name(cid):
+            if not cid:
+                return '-'
+            try:
+                from database.db_regions import region_manager as _rm
+                c = await _rm.get_city_by_id(int(cid))
+                return (c or {}).get('name') or '-'
+            except Exception:
+                return '-'
+
+        async def _district_name(did):
+            if not did:
+                return '-'
+            try:
+                from database.db_regions import region_manager as _rm
+                d = await _rm.get_district_by_id(int(did))
+                return (d or {}).get('name') or '-'
+            except Exception:
+                return '-'
+
+        async def _keyword_names(merchant_id: int) -> str:
+            try:
+                rows = await db_manager.fetch_all(
+                    "SELECT k.name FROM merchant_keywords mk JOIN keywords k ON k.id = mk.keyword_id WHERE mk.merchant_id = ? ORDER BY k.display_order, k.id",
+                    (merchant_id,)
+                )
+                return ', '.join([r['name'] for r in rows]) or '无'
+            except Exception:
+                return '无'
+
+        labels = {
+            'name': '名称', 'contact_info': '联系方式', 'p_price': 'P价格', 'pp_price': 'PP价格',
+            'custom_description': '服务描述', 'adv_sentence': '优势一句话', 'merchant_type': '商户类型',
+            'city_id': '城市', 'district_id': '地区', 'publish_time': '发布时间', 'keywords': '关键词'
+        }
+
+        lines = [f"📝 商家信息更新通知", f"商家：{name}（ID {mid}）", ""]
+        for key in changed_fields:
+            if key == 'keywords':
+                new_v = await _keyword_names(mid)
+                lines.append(f"• {labels[key]}：{new_v}")
+                continue
+            ov = (before or {}).get(key)
+            nv = (after or {}).get(key)
+            if key == 'city_id':
+                ov, nv = await _city_name(ov), await _city_name(nv)
+            if key == 'district_id':
+                ov, nv = await _district_name(ov), await _district_name(nv)
+            lines.append(f"• {labels.get(key, key)}：{ov or '-'} → {nv or '-'}")
+
+        text = "\n".join(lines)
+        for aid in ADMIN_IDS:
+            try:
+                await bot.send_message(int(aid), text)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
 async def _push_user_message(state: FSMContext, message_id: int) -> None:
     """记录用户输入的消息ID，便于统一清理。"""
     try:
@@ -496,6 +565,20 @@ class MerchantHandler:
             if not merchant_id:
                 return
             await MerchantManager.update_merchant(merchant_id, changes)
+            # 若已发布且有post_url，尝试同步频道caption（用于草稿实时写入）
+            try:
+                m2 = await MerchantManager.get_merchant_by_id(merchant_id)
+                if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                    await _refresh_post(merchant_id)
+            except Exception:
+                pass
+            # 若已发布且有post_url，尝试同步频道caption
+            try:
+                m2 = await MerchantManager.get_merchant_by_id(merchant_id)
+                if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                    await _refresh_post(merchant_id)
+            except Exception:
+                pass
         except Exception as e:
             logger.debug(f"更新商户草稿信息失败: {e}")
     
@@ -699,7 +782,8 @@ async def show_profile_panel_like_user(message: Message, user_id: int, state: FS
         from database.db_merchants import MerchantManager as _MM
         from database.db_regions import region_manager as _region
         from config import DEEPLINK_BOT_USERNAME as _BOTU
-        from utils.caption_renderer import render_channel_caption_md as _render_md
+from utils.caption_renderer import render_channel_caption_md as _render_md
+from services.review_publish_service import refresh_merchant_post_reviews as _refresh_post
 
         merchant = await _MM.get_merchant_by_chat_id(user_id)
         if not merchant:
@@ -1269,6 +1353,13 @@ async def merchant_edit_region_pick_district(callback: CallbackQuery, state: FSM
             return
         updates = {'city_id': cid or None, 'district_id': did}
         await MerchantManager.update_merchant(merchant['id'], updates)
+        # 若已发布且有post_url，尝试同步频道caption
+        try:
+            m2 = await MerchantManager.get_merchant_by_id(merchant['id'])
+            if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                await _refresh_post(merchant['id'])
+        except Exception:
+            pass
         await _finalize_and_back_to_menu(state, callback.bot, callback.message.chat.id, callback.message, user_id)
         await callback.answer("已保存")
     except Exception as e:
@@ -1489,6 +1580,16 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                         (merchant['id'], kid)
                     )
                 await state.clear()
+                # 若已发布且有post_url，尝试同步频道caption（标签可能影响caption）
+                try:
+                    m2 = await MerchantManager.get_merchant_by_id(merchant['id'])
+                    if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                        await _refresh_post(merchant['id'])
+                    # 管理员通知（关键词更新）
+                    before_stub = { 'id': merchant['id'], 'name': m2.get('name') if m2 else '-', 'keywords': None }
+                    await _notify_admin_change(callback.bot, before_stub, m2, ['keywords'])
+                except Exception:
+                    pass
                 try:
                     await show_profile_panel_like_user(callback.message, user_id, state)
                 except Exception:
@@ -1853,6 +1954,13 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                             if merchant:
                                 if step_num == 1:
                                     await MerchantManager.update_merchant(merchant['id'], {'merchant_type': selected_value})
+                                    # 若已发布且有post_url，尝试同步频道caption
+                                    try:
+                                        m2 = await MerchantManager.get_merchant_by_id(merchant['id'])
+                                        if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                                            await _refresh_post(merchant['id'])
+                                    except Exception:
+                                        pass
                                     await _finalize_and_back_to_menu(state, callback.bot, callback.message.chat.id, callback.message, user_id)
                                     await callback.answer("已保存")
                                     return
@@ -1899,6 +2007,12 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                                         'district_id': int(selected_value) if str(selected_value).isdigit() else None,
                                     }
                                     await MerchantManager.update_merchant(merchant['id'], updates)
+                                    try:
+                                        m2 = await MerchantManager.get_merchant_by_id(merchant['id'])
+                                        if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                                            await _refresh_post(merchant['id'])
+                                    except Exception:
+                                        pass
                                     await _finalize_and_back_to_menu(state, callback.bot, callback.message.chat.id, callback.message, user_id)
                                     await callback.answer("已保存")
                                     return
@@ -1931,6 +2045,12 @@ async def handle_binding_callbacks(callback: CallbackQuery, state: FSMContext):
                                     await MerchantManager.update_merchant(merchant_self['id'], {
                                         'publish_time': f"{date_str} {time_str}:00"
                                     })
+                                    try:
+                                        m2 = await MerchantManager.get_merchant_by_id(merchant_self['id'])
+                                        if m2 and str(m2.get('status')) == 'published' and m2.get('post_url'):
+                                            await _refresh_post(merchant_self['id'])
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
                         # 清理步骤状态并返回资料面板
@@ -2011,7 +2131,15 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
             try:
                 merchant = await MerchantManager.get_merchant_by_chat_id(user_id)
                 if merchant:
+                    before = await MerchantManager.get_merchant_by_id(merchant['id'])
                     await MerchantManager.update_merchant(merchant['id'], {'name': text})
+                    try:
+                        after = await MerchantManager.get_merchant_by_id(merchant['id'])
+                        if after and str(after.get('status')) == 'published' and after.get('post_url'):
+                            await _refresh_post(merchant['id'])
+                        await _notify_admin_change(message.bot, before, after, ['name'])
+                    except Exception:
+                        pass
             except Exception:
                 pass
             await _clear_prompt_messages(state, message.bot, message.chat.id)
@@ -2023,7 +2151,15 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
             try:
                 merchant = await MerchantManager.get_merchant_by_chat_id(user_id)
                 if merchant:
+                    before = await MerchantManager.get_merchant_by_id(merchant['id'])
                     await MerchantManager.update_merchant(merchant['id'], {'contact_info': text})
+                    try:
+                        after = await MerchantManager.get_merchant_by_id(merchant['id'])
+                        if after and str(after.get('status')) == 'published' and after.get('post_url'):
+                            await _refresh_post(merchant['id'])
+                        await _notify_admin_change(message.bot, before, after, ['contact_info'])
+                    except Exception:
+                        pass
             except Exception:
                 pass
             await _clear_prompt_messages(state, message.bot, message.chat.id)
@@ -2102,7 +2238,15 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
                 try:
                     merchant = await MerchantManager.get_merchant_by_chat_id(user_id)
                     if merchant:
+                        before = await MerchantManager.get_merchant_by_id(merchant['id'])
                         await MerchantManager.update_merchant(merchant['id'], {'custom_description': text})
+                        try:
+                            after = await MerchantManager.get_merchant_by_id(merchant['id'])
+                            if after and str(after.get('status')) == 'published' and after.get('post_url'):
+                                await _refresh_post(merchant['id'])
+                            await _notify_admin_change(message.bot, before, after, ['custom_description'])
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 await _clear_prompt_messages(state, message.bot, message.chat.id)
@@ -2134,7 +2278,15 @@ async def handle_binding_text_input(message: Message, state: FSMContext):
                 try:
                     merchant = await MerchantManager.get_merchant_by_chat_id(user_id)
                     if merchant:
+                        before = await MerchantManager.get_merchant_by_id(merchant['id'])
                         await MerchantManager.update_merchant(merchant['id'], {'adv_sentence': text})
+                        try:
+                            after = await MerchantManager.get_merchant_by_id(merchant['id'])
+                            if after and str(after.get('status')) == 'published' and after.get('post_url'):
+                                await _refresh_post(merchant['id'])
+                            await _notify_admin_change(message.bot, before, after, ['adv_sentence'])
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 await _clear_prompt_messages(state, message.bot, message.chat.id)

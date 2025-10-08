@@ -344,6 +344,13 @@ CREATE TABLE IF NOT EXISTS merchant_posts (
 CREATE INDEX IF NOT EXISTS idx_merchant_posts_mid ON merchant_posts(merchant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_merchant_posts_unique ON merchant_posts(merchant_id, chat_id, message_id);
 
+-- 地区手动白名单：启用“手动加入地区”后，仅白名单商户可出现在机器人地区搜索中
+CREATE TABLE IF NOT EXISTS region_manual_whitelist (
+    merchant_id INTEGER PRIMARY KEY,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (merchant_id) REFERENCES merchants(id) ON DELETE CASCADE
+);
+
 -- 绑定码表索引
 CREATE INDEX IF NOT EXISTS idx_binding_codes_code ON binding_codes(code);
 CREATE INDEX IF NOT EXISTS idx_binding_codes_expires_at ON binding_codes(expires_at);

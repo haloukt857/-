@@ -15,6 +15,10 @@ from ..layout import (
     get_or_create_csrf_token, validate_csrf
 )
 from ..services.merchant_mgmt_service import MerchantMgmtService
+from database.db_region_gate import (
+    is_manual_gate_enabled, set_manual_gate_enabled,
+    add_whitelist, remove_whitelist, get_whitelist_set
+)
 from utils.enums import MERCHANT_STATUS
 
 logger = logging.getLogger(__name__)
@@ -50,11 +54,27 @@ async def merchants_list(request: Request):
         pagination = merchants_data["pagination"]
         # 严格以数据库字段为准，不做任何前端兜底拼装。
         
+        # 手动加入地区：总开关与白名单集合
+        gate_enabled = await is_manual_gate_enabled()
+        id_list = [m.get('id') for m in merchants if m.get('id') is not None]
+        wl_set = await get_whitelist_set(id_list) if id_list else set()
+
         # 创建商户管理页面
         content = Div(
             # 使用统一的页面头部
             Div(
                 H1("商户管理", cls="page-title"),
+                # 手动加入地区总开关
+                Form(
+                    Div(
+                        Label("启用手动加入地区功能", cls="label mr-2"),
+                        Input(type="hidden", name="enabled", value=str(not gate_enabled).lower()),
+                        Button("开启" if not gate_enabled else "关闭", type="submit", cls=f"btn {'btn-success' if not gate_enabled else 'btn-warning'} btn-sm"),
+                        Span("（开启后，只有被点击“加入地区”的商家才会出现在机器人地区搜索中）", cls="text-xs text-gray-400 ml-3"),
+                        cls="flex items-center"
+                    ),
+                    method="post", action="/merchants/manual-region-toggle",
+                ),
                 cls="page-header"
             ),
             
@@ -202,6 +222,12 @@ async def merchants_list(request: Request):
                                     Div(
                                         A("详情", href=f"/merchants/{merchant.get('id')}/detail", cls="btn btn-xs btn-info"),
                                         A("帖子管理", href=f"/posts/{merchant.get('id')}", cls="btn btn-xs btn-secondary ml-1"),
+                                        # 手动加入地区按钮（仅在开启功能时显示）
+                                        (
+                                            Form(Button("移出地区", type="submit", cls="btn btn-xs btn-warning ml-1"), method="post", action=f"/merchants/{merchant.get('id')}/region-remove")
+                                            if (gate_enabled and merchant.get('id') in wl_set) else
+                                            (Form(Button("加入地区", type="submit", cls="btn btn-xs btn-success ml-1"), method="post", action=f"/merchants/{merchant.get('id')}/region-allow") if gate_enabled else "")
+                                        ),
                                         cls="flex justify-end"
                                     )
                                 )
@@ -357,6 +383,42 @@ async def merchant_update_status(request: Request):
         logger.error(f"更新商户状态失败: {e}")
         from starlette.responses import RedirectResponse
         return RedirectResponse(url=f"/merchants/{merchant_id}/detail?error=exception", status_code=302)
+
+
+@require_auth
+async def manual_region_toggle(request: Request):
+    """切换“手动加入地区”总开关。"""
+    try:
+        form = await request.form()
+        enabled_raw = str(form.get('enabled', '')).strip().lower()
+        enabled = enabled_raw in {'1','true','yes','on'}
+        await set_manual_gate_enabled(enabled)
+    except Exception:
+        pass
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/merchants", status_code=302)
+
+
+@require_auth
+async def merchant_region_allow(request: Request):
+    merchant_id = int(request.path_params.get('merchant_id'))
+    try:
+        await add_whitelist(merchant_id)
+    except Exception:
+        pass
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/merchants", status_code=302)
+
+
+@require_auth
+async def merchant_region_remove(request: Request):
+    merchant_id = int(request.path_params.get('merchant_id'))
+    try:
+        await remove_whitelist(merchant_id)
+    except Exception:
+        pass
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url="/merchants", status_code=302)
 
 
 @require_auth

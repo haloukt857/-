@@ -376,19 +376,26 @@ class MerchantManager:
     @staticmethod
     async def list_active_by_district(district_id: int, limit: int = 30, offset: int = 0) -> List[Dict[str, Any]]:
         try:
-            query = """
+            # 判断是否启用“手动加入地区”总开关
+            from .db_region_gate import is_manual_gate_enabled
+            gate_enabled = await is_manual_gate_enabled()
+
+            base = """
                 SELECT m.id, m.name, m.p_price, m.pp_price,
                        m.publish_time, m.expiration_time, m.created_at, m.updated_at,
                        d.name AS district_name, c.name AS city_name
                 FROM merchants m
                 LEFT JOIN districts d ON m.district_id = d.id
                 LEFT JOIN cities c ON m.city_id = c.id
+            """
+            join_gate = " JOIN region_manual_whitelist rwl ON rwl.merchant_id = m.id " if gate_enabled else ""
+            where = """
                 WHERE m.district_id = ?
                   AND m.status IN ('approved','published')
                   AND (m.expiration_time IS NULL OR m.expiration_time > datetime('now'))
-                ORDER BY COALESCE(m.publish_time, m.created_at) ASC
-                LIMIT ? OFFSET ?
             """
+            order = " ORDER BY COALESCE(m.publish_time, m.created_at) ASC LIMIT ? OFFSET ?"
+            query = base + join_gate + where + order
             rows = await db_manager.fetch_all(query, (int(district_id), int(limit), int(offset)))
             return [dict(r) for r in rows]
         except Exception as e:
