@@ -25,7 +25,7 @@ from config import WEB_CONFIG, bot_config
 from .routes import (
     auth, dashboard, merchants, users, orders,
     reviews, regions, incentives, subscription,
-    binding_codes, posts, templates, debug, media, user_analytics, scheduling, channels, broadcast
+    binding_codes, posts, templates, debug, media, user_analytics, scheduling, channels, broadcast, keywords
 )
 if os.getenv('RUN_MODE', 'dev') == 'dev':
     from .routes import dev_tools
@@ -211,6 +211,15 @@ app.route("/schedule/time-slots", methods=['GET', 'POST'])(scheduling.time_slots
 
 # 频道配置
 app.route("/channels/config", methods=['GET', 'POST'])(channels.channel_config_page)
+
+# 关键词管理（配置中心）
+try:
+    app.get("/config/keywords")(keywords.keywords_list)
+    app.post("/config/keywords/create")(keywords.keywords_create)
+    app.post("/config/keywords/update")(keywords.keywords_update)
+    app.post("/config/keywords/{keyword_id:int}/delete")(keywords.keywords_delete)
+except Exception:
+    pass
 
 # 手动广播
 app.get("/broadcast")(broadcast.broadcast_page)
