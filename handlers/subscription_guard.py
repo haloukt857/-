@@ -1,6 +1,6 @@
 """
-频道订阅验证模块
-实现aiogram 3.x标准中间件，基于system_config配置的频道订阅验证
+频道/群组关注验证模块
+实现 aiogram 3.x 标准中间件，基于 system_config 的“频道/群组强制关注”配置进行校验
 """
 
 import json
@@ -20,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class SubscriptionVerificationMiddleware(BaseMiddleware):
-    """频道订阅验证中间件
+    """频道/群组关注验证中间件
     
-    实现aiogram 3.x标准中间件，在处理用户消息前检查频道订阅状态
-    基于system_config表的动态配置，支持管理员豁免
+    在处理用户消息前检查用户是否已关注必需的频道或加入必需的群组。
+    基于 system_config 表的动态配置，支持管理员豁免。
     """
     
     def __init__(self):
@@ -109,7 +109,7 @@ class SubscriptionVerificationMiddleware(BaseMiddleware):
         return await handler(event, data)
     
     async def _get_config(self) -> Dict[str, Any]:
-        """从系统配置获取订阅验证配置
+        """从系统配置获取订阅/群组验证配置
         
         Returns:
             配置字典，包含enabled和required_subscriptions字段
@@ -251,7 +251,10 @@ class SubscriptionVerificationMiddleware(BaseMiddleware):
                 )
             except Exception:
                 # 若模板缺失，退回到简易提示（避免打断流程）
-                message_text = f"❌ 您需要先关注以下频道才能使用机器人功能：\n\n{channels_text}\n\n关注完成后点击下方“✅ 我已加入”检测。"
+                message_text = (
+                    f"❌ 使用功能前需要先关注以下频道或加入群组：\n\n{channels_text}\n\n"
+                    f"关注/加入完成后点击下方“✅ 我已加入”进行检测。"
+                )
 
             # 构建键盘：每个频道一个“加入”按钮 + 一个“✅ 我已加入”
             keyboard_rows = []

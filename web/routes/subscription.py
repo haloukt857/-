@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-订阅验证路由模块
-处理用户频道订阅验证和管理功能
+订阅（频道/群组）验证路由模块
+处理强制“关注频道或加入群组”的校验与后台管理。
 
 页面功能（最小改动、对齐服务层字段规范）：
 - 查看与切换“订阅验证开关”
-- 查看必需订阅频道列表（标准键：chat_id/display_name/join_link）
-- 添加必需订阅频道
-- 删除必需订阅频道
+- 查看必需关注对象列表（频道/群组，标准键：chat_id/display_name/join_link）
+- 添加必需关注对象（支持 @username、-100 数值ID、https://t.me|telegram.me/username）
+- 删除必需关注对象
 
 说明：采用 POST + CSRF 提交动作，已在 web/app.py 注册对应 POST 路由，
 与站内其他管理页保持一致的交互语义。
@@ -29,9 +29,16 @@ from ..services.subscription_mgmt_service import SubscriptionMgmtService
 logger = logging.getLogger(__name__)
 
 def _parse_channel_input(text: str) -> tuple[str, str]:
-    """从管理员输入解析 chat_id 与 join_link。
-    支持：@username、-100 开头的数值ID、https://t.me/username。
+    """从管理员输入解析 chat_id 与 join_link（频道/群组通用）。
+    
+    支持：
+    - @username（公开频道/群组）
+    - -100 开头的数值 chat_id（超级群/频道）
+    - https://t.me/username 或 https://telegram.me/username（含 http 与无协议简写）
+    
     返回：(chat_id, join_link)。若无法解析 chat_id，抛出 ValueError。
+    说明：私有邀请链接（如 t.me/+xxxx 或 joinchat/xxxx）无法反解 chat_id，
+    如需强制校验请改用公开用户名或数值 chat_id。
     """
     import re
     t = (text or '').strip()
@@ -41,20 +48,16 @@ def _parse_channel_input(text: str) -> tuple[str, str]:
     if t.startswith('@') and len(t) > 1:
         username = t[1:]
         return f'@{username}', f'https://t.me/{username}'
-    # 2) -100 开头的数值 chat_id
-    if re.fullmatch(r'-100\d+', t):
+    # 2) 负数 chat_id（群/超群/频道常见为 -100...，也兼容历史 -\d+）
+    if re.fullmatch(r'-\d+', t):
         return t, ''
-    # 3) t.me 链接
-    m = re.match(r'^https?://t\.me/([A-Za-z0-9_]{5,})', t)
+    # 3) t.me|telegram.me 链接（支持 http/https，允许无协议简写）
+    m = re.match(r'^(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z0-9_]{5,})$', t)
     if m:
         username = m.group(1)
         return f'@{username}', f'https://t.me/{username}'
-    # 4) 简写 t.me/username
-    m = re.match(r'^t\.me/([A-Za-z0-9_]{5,})', t)
-    if m:
-        username = m.group(1)
-        return f'@{username}', f'https://t.me/{username}'
-    # 5) 其它邀请链接（如 t.me/+xxxx）无法反解出 chat_id，提示失败
+    
+    # 4) 其它邀请链接（如 t.me/+xxxx）无法反解出 chat_id，提示失败
     raise ValueError('无法从输入中解析 chat_id 或 @用户名')
 
 
